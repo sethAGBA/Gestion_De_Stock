@@ -234,7 +234,6 @@ class BonCommande {
   final DateTime date;
   final String statut;
   final double? total;
-  List<BonCommandeItem> items;
 
   BonCommande({
     required this.id,
@@ -243,7 +242,6 @@ class BonCommande {
     required this.date,
     required this.statut,
     this.total,
-    this.items = const [],
   });
 
   Map<String, dynamic> toMap() {
@@ -312,10 +310,17 @@ class Facture {
   final String numero;
   final int bonCommandeId;
   final int clientId;
-  String? clientNom;
+  final String? clientNom;
+  final String? adresse;
+  final String? vendeurNom;
+  final String? magasinAdresse;
+  final double ristourne;
   final DateTime date;
   final double total;
   final String statutPaiement;
+  final double? montantPaye;
+  final double? montantRemis;
+  final double? monnaie;
 
   Facture({
     required this.id,
@@ -323,9 +328,16 @@ class Facture {
     required this.bonCommandeId,
     required this.clientId,
     this.clientNom,
+    this.adresse,
+    this.vendeurNom,
+    this.magasinAdresse,
+    this.ristourne = 0.0,
     required this.date,
     required this.total,
     required this.statutPaiement,
+    this.montantPaye,
+    this.montantRemis,
+    this.monnaie,
   });
 
   Map<String, dynamic> toMap() {
@@ -334,9 +346,17 @@ class Facture {
       'numero': numero,
       'bonCommandeId': bonCommandeId,
       'clientId': clientId,
+      'clientNom': clientNom,
+      'adresse': adresse,
+      'vendeurNom': vendeurNom,
+      'magasinAdresse': magasinAdresse,
+      'ristourne': ristourne,
       'date': date.millisecondsSinceEpoch,
       'total': total,
       'statutPaiement': statutPaiement,
+      'montantPaye': montantPaye,
+      'montantRemis': montantRemis,
+      'monnaie': monnaie,
     };
   }
 
@@ -346,9 +366,17 @@ class Facture {
       numero: map['numero'] as String? ?? '',
       bonCommandeId: (map['bonCommandeId'] as num?)?.toInt() ?? 0,
       clientId: (map['clientId'] as num?)?.toInt() ?? 0,
+      clientNom: map['clientNom'] as String?,
+      adresse: map['adresse'] as String?,
+      vendeurNom: map['vendeurNom'] as String?,
+      magasinAdresse: map['magasinAdresse'] as String?,
+      ristourne: (map['ristourne'] as num?)?.toDouble() ?? 0.0,
       date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
       total: (map['total'] as num?)?.toDouble() ?? 0.0,
       statutPaiement: map['statutPaiement'] as String? ?? 'en attente',
+      montantPaye: (map['montantPaye'] as num?)?.toDouble(),
+      montantRemis: (map['montantRemis'] as num?)?.toDouble(),
+      monnaie: (map['monnaie'] as num?)?.toDouble(),
     );
   }
 }
@@ -357,6 +385,8 @@ class Paiement {
   final int id;
   final int factureId;
   final double montant;
+  final double? montantRemis;
+  final double? monnaie;
   final DateTime date;
   final String methode;
 
@@ -364,6 +394,8 @@ class Paiement {
     required this.id,
     required this.factureId,
     required this.montant,
+    this.montantRemis,
+    this.monnaie,
     required this.date,
     required this.methode,
   });
@@ -373,6 +405,8 @@ class Paiement {
       'id': id == 0 ? null : id,
       'factureId': factureId,
       'montant': montant,
+      'montantRemis': montantRemis,
+      'monnaie': monnaie,
       'date': date.millisecondsSinceEpoch,
       'methode': methode,
     };
@@ -383,6 +417,8 @@ class Paiement {
       id: (map['id'] as num?)?.toInt() ?? 0,
       factureId: (map['factureId'] as num?)?.toInt() ?? 0,
       montant: (map['montant'] as num?)?.toDouble() ?? 0.0,
+      montantRemis: (map['montantRemis'] as num?)?.toDouble(),
+      monnaie: (map['monnaie'] as num?)?.toDouble(),
       date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
       methode: map['methode'] as String? ?? '',
     );
