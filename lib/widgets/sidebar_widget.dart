@@ -1,5 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 
 class SidebarWidget extends StatefulWidget {
   final Function(int)? onItemTapped;
@@ -134,14 +136,24 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                   index: 10,
                   isExpanded: !isVerySmallScreen && _isExpanded,
                 ),
+                _buildMenuItem(
+                  icon: Icons.settings,
+                  title: 'Paramètres',
+                  index: 9,
+                  isExpanded: !isVerySmallScreen && _isExpanded,
+                ),
+                _buildMenuItem(
+                  icon: Icons.logout,
+                  title: 'Déconnexion',
+                  index: -1, // Special index to avoid navigation
+                  isExpanded: !isVerySmallScreen && _isExpanded,
+                  onTap: () {
+                    Provider.of<AuthProvider>(context, listen: false).logout();
+                    Navigator.pushReplacementNamed(context, '/login');
+                  },
+                ),
               ],
             ),
-          ),
-          _buildMenuItem(
-            icon: Icons.settings,
-            title: 'Paramètres',
-            index: 9,
-            isExpanded: !isVerySmallScreen && _isExpanded,
           ),
         ],
       ),
@@ -154,6 +166,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
     required int index,
     bool isSelected = false,
     required bool isExpanded,
+    VoidCallback? onTap,
   }) {
     return Container(
       margin: EdgeInsets.symmetric(horizontal: isExpanded ? 16.0 : 8.0, vertical: 4.0),
@@ -173,8 +186,8 @@ class _SidebarWidgetState extends State<SidebarWidget> {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
-        onTap: () {
-          if (widget.onItemTapped != null) {
+        onTap: onTap ?? () {
+          if (widget.onItemTapped != null && index >= 0) {
             widget.onItemTapped!(index);
           }
         },

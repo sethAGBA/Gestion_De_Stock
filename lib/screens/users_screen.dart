@@ -45,6 +45,11 @@ class _UsersScreenState extends State<UsersScreen> {
         title: const Text('Gestion des utilisateurs'),
         actions: [
           IconButton(
+            icon: const Icon(Icons.login),
+            tooltip: 'Se connecter',
+            onPressed: () => _showLoginDialog(context),
+          ),
+          IconButton(
             icon: const Icon(Icons.add),
             tooltip: 'Ajouter un utilisateur',
             onPressed: () => _showAddUserDialog(context),
@@ -253,6 +258,11 @@ class _UsersScreenState extends State<UsersScreen> {
               ),
             ),
             IconButton(
+              icon: const Icon(Icons.lock, color: Colors.purple),
+              onPressed: () => _showChangePasswordDialog(context, user),
+              tooltip: 'Changer le mot de passe',
+            ),
+            IconButton(
               icon: const Icon(Icons.edit, color: Colors.blue),
               onPressed: () => _showEditUserDialog(context, user),
               tooltip: 'Modifier',
@@ -289,10 +299,213 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
+  // New login dialog
+  Future<void> _showLoginDialog(BuildContext context) async {
+    debugPrint('Opening login dialog');
+    String? name;
+    String? password;
+    bool isValid = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Se connecter'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Nom',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      name = value.trim();
+                      isValid = _validateLoginForm(name, password);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Mot de passe',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      password = value.trim();
+                      isValid = _validateLoginForm(name, password);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un mot de passe' : null,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: isValid
+                  ? () async {
+                      try {
+                        final user = await DatabaseHelper.loginUser(name!, password!);
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          if (user != null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Connexion réussie : ${user.name}')),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Nom ou mot de passe incorrect')),
+                            );
+                          }
+                        }
+                      } catch (e) {
+                        debugPrint('Error during login: $e');
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Erreur : $e')),
+                          );
+                        }
+                      }
+                    }
+                  : null,
+              child: const Text('Connexion'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // New change password dialog
+  Future<void> _showChangePasswordDialog(BuildContext context, User user) async {
+    debugPrint('Opening change password dialog');
+    String? currentPassword;
+    String? newPassword;
+    String? confirmPassword;
+    bool isValid = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Changer le mot de passe'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Mot de passe actuel',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      currentPassword = value.trim();
+                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez le mot de passe actuel' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Nouveau mot de passe',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      newPassword = value.trim();
+                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nouveau mot de passe' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Confirmer le nouveau mot de passe',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      confirmPassword = value.trim();
+                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Confirmez le mot de passe' : null,
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            ElevatedButton(
+              onPressed: isValid
+                  ? () async {
+                      try {
+                        // Verify current password
+                        final currentUser = await DatabaseHelper.loginUser(user.name, currentPassword!);
+                        if (currentUser == null) {
+                          if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Mot de passe actuel incorrect')),
+                            );
+                          }
+                          return;
+                        }
+                        // Update password
+                        final updatedUser = User(
+                          id: user.id,
+                          name: user.name,
+                          role: user.role,
+                          password: newPassword!,
+                        );
+                        await DatabaseHelper.updateUser(updatedUser);
+                        if (context.mounted) {
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Mot de passe modifié avec succès')),
+                          );
+                        }
+                      } catch (e) {
+                        debugPrint('Error changing password: $e');
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Erreur : $e')),
+                          );
+                        }
+                      }
+                    }
+                  : null,
+              child: const Text('Changer'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _showAddUserDialog(BuildContext context) async {
     debugPrint('Opening add user dialog');
     String? name;
     String? role;
+    String? password;
     bool isValid = false;
     final roles = ['Administrateur', 'Employé'];
 
@@ -313,7 +526,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       name = value.trim();
-                      isValid = _validateForm(name, role);
+                      isValid = _validateAddUserForm(name, role, password);
                     });
                   },
                   validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
@@ -333,10 +546,25 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       role = value;
-                      isValid = _validateForm(name, role);
+                      isValid = _validateAddUserForm(name, role, password);
                     });
                   },
                   validator: (value) => value == null ? 'Sélectionnez un rôle' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Mot de passe',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      password = value.trim();
+                      isValid = _validateAddUserForm(name, role, password);
+                    });
+                  },
+                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un mot de passe' : null,
                 ),
               ],
             ),
@@ -354,7 +582,7 @@ class _UsersScreenState extends State<UsersScreen> {
                           id: 0, // Auto-incremented by DB
                           name: name!,
                           role: role!,
-                          password: '', // TODO: Set a default or prompt for password
+                          password: password!, // Use provided password
                         );
                         await DatabaseHelper.addUser(user);
                         if (context.mounted) {
@@ -519,5 +747,27 @@ class _UsersScreenState extends State<UsersScreen> {
 
   bool _validateForm(String? name, String? role) {
     return name != null && name.trim().isNotEmpty && role != null;
+  }
+
+  bool _validateLoginForm(String? name, String? password) {
+    return name != null && name.trim().isNotEmpty && password != null && password.trim().isNotEmpty;
+  }
+
+  bool _validatePasswordForm(String? currentPassword, String? newPassword, String? confirmPassword) {
+    return currentPassword != null &&
+        currentPassword.trim().isNotEmpty &&
+        newPassword != null &&
+        newPassword.trim().isNotEmpty &&
+        confirmPassword != null &&
+        confirmPassword.trim().isNotEmpty &&
+        newPassword == confirmPassword;
+  }
+
+  bool _validateAddUserForm(String? name, String? role, String? password) {
+    return name != null &&
+        name.trim().isNotEmpty &&
+        role != null &&
+        password != null &&
+        password.trim().isNotEmpty;
   }
 }

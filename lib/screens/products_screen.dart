@@ -1,7 +1,6 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart' as path;
+import '../helpers/database_helper.dart';
 import '../models/models.dart';
 
 class ProductsScreen extends StatefulWidget {
@@ -14,12 +13,11 @@ class ProductsScreen extends StatefulWidget {
 class _ProductsScreenState extends State<ProductsScreen> {
   final _searchController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
-  late Database _database;
   final List<String> _unites = ['Pièce', 'Litre', 'kg', 'Boîte'];
   final List<String> _categories = ['Électronique', 'Vêtements', 'Alimentation', 'Autres'];
   final List<String> _statuts = ['disponible', 'en rupture', 'arrêté'];
 
-  int _id = 0; // Changed to int
+  int _id = 0;
   String _nom = '';
   String? _description;
   String _categorie = 'Électronique';
@@ -50,12 +48,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
   void initState() {
     super.initState();
     _produitsFuture = Future.value([]);
-    _initDatabase().then((_) {
-      setState(() {
-        _produitsFuture = _getProducts();
-      });
-    }).catchError((e) {
-      print('Erreur lors de l\'initialisation : $e');
+    setState(() {
+      _produitsFuture = DatabaseHelper.getProduits();
     });
     _searchController.addListener(_filterProducts);
   }
@@ -64,310 +58,12 @@ class _ProductsScreenState extends State<ProductsScreen> {
   void dispose() {
     _searchController.dispose();
     _searchController.removeListener(_filterProducts);
-    _database.close();
     super.dispose();
   }
 
-  Future<void> _initDatabase() async {
-    print('Initialisation de la base de données...');
-    _database = await openDatabase(
-      path.join(await getDatabasesPath(), 'dashboard.db'),
-      version: 5,
-      onCreate: (db, version) async {
-        print('Création des tables...');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS produits (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom TEXT NOT NULL,
-            description TEXT,
-            categorie TEXT NOT NULL,
-            marque TEXT,
-            imageUrl TEXT,
-            sku TEXT,
-            codeBarres TEXT,
-            unite TEXT NOT NULL,
-            quantiteStock INTEGER NOT NULL DEFAULT 0,
-            quantiteAvariee INTEGER NOT NULL DEFAULT 0,
-            stockMin INTEGER NOT NULL DEFAULT 0,
-            stockMax INTEGER NOT NULL DEFAULT 0,
-            seuilAlerte INTEGER NOT NULL DEFAULT 0,
-            variantes TEXT,
-            prixAchat REAL NOT NULL DEFAULT 0.0,
-            prixVente REAL NOT NULL DEFAULT 0.0,
-            tva REAL NOT NULL DEFAULT 0.0,
-            fournisseurPrincipal TEXT,
-            fournisseursSecondaires TEXT,
-            derniereEntree INTEGER,
-            derniereSortie INTEGER,
-            statut TEXT NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS suppliers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            productName TEXT NOT NULL,
-            category TEXT NOT NULL,
-            price REAL NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS historique_avaries (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            produitId INTEGER NOT NULL,
-            produitNom TEXT NOT NULL,
-            quantite INTEGER NOT NULL,
-            action TEXT NOT NULL,
-            utilisateur TEXT NOT NULL,
-            date INTEGER NOT NULL,
-            FOREIGN KEY (produitId) REFERENCES produits(id)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS clients (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            nom TEXT NOT NULL,
-            email TEXT,
-            telephone TEXT,
-            adresse TEXT
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS bons_commande (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            clientId INTEGER NOT NULL,
-            date INTEGER NOT NULL,
-            statut TEXT NOT NULL,
-            FOREIGN KEY (clientId) REFERENCES clients(id)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS bon_commande_items (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            bonCommandeId INTEGER NOT NULL,
-            produitId INTEGER NOT NULL,
-            quantite INTEGER NOT NULL,
-            prixUnitaire REAL NOT NULL,
-            FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
-            FOREIGN KEY (produitId) REFERENCES produits(id)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS factures (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            numero TEXT NOT NULL,
-            bonCommandeId INTEGER NOT NULL,
-            clientId INTEGER NOT NULL,
-            date INTEGER NOT NULL,
-            total REAL NOT NULL,
-            statutPaiement TEXT NOT NULL,
-            FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
-            FOREIGN KEY (clientId) REFERENCES clients(id)
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE IF NOT EXISTS paiements (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            factureId INTEGER NOT NULL,
-            montant REAL NOT NULL,
-            date INTEGER NOT NULL,
-            methode TEXT NOT NULL,
-            FOREIGN KEY (factureId) REFERENCES factures(id)
-          )
-        ''');
-      },
-      onUpgrade: (db, oldVersion, newVersion) async {
-        print('Mise à jour de la base de données de $oldVersion à $newVersion...');
-        if (oldVersion < 2) {
-          await db.execute('ALTER TABLE produits ADD COLUMN quantiteAvariee INTEGER NOT NULL DEFAULT 0');
-        }
-        if (oldVersion < 3) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS historique_avaries (
-              id TEXT PRIMARY KEY,
-              produitId TEXT NOT NULL,
-              quantite INTEGER NOT NULL,
-              action TEXT NOT NULL,
-              utilisateur TEXT NOT NULL,
-              date INTEGER NOT NULL,
-              FOREIGN KEY (produitId) REFERENCES produits(id)
-            )
-          ''');
-        }
-        if (oldVersion < 4) {
-          print('Migration vers version 4 : conversion des ID en INTEGER');
-          await db.execute('''
-            CREATE TABLE produits_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              nom TEXT NOT NULL,
-              description TEXT,
-              categorie TEXT NOT NULL,
-              marque TEXT,
-              imageUrl TEXT,
-              sku TEXT,
-              codeBarres TEXT,
-              unite TEXT NOT NULL,
-              quantiteStock INTEGER NOT NULL DEFAULT 0,
-              quantiteAvariee INTEGER NOT NULL DEFAULT 0,
-              stockMin INTEGER NOT NULL DEFAULT 0,
-              stockMax INTEGER NOT NULL DEFAULT 0,
-              seuilAlerte INTEGER NOT NULL DEFAULT 0,
-              variantes TEXT,
-              prixAchat REAL NOT NULL DEFAULT 0.0,
-              prixVente REAL NOT NULL DEFAULT 0.0,
-              tva REAL NOT NULL DEFAULT 0.0,
-              fournisseurPrincipal TEXT,
-              fournisseursSecondaires TEXT,
-              derniereEntree INTEGER,
-              derniereSortie INTEGER,
-              statut TEXT NOT NULL
-            )
-          ''');
-          await db.execute('''
-            INSERT INTO produits_new (
-              nom, description, categorie, marque, imageUrl, sku, codeBarres, unite,
-              quantiteStock, quantiteAvariee, stockMin, stockMax, seuilAlerte, variantes,
-              prixAchat, prixVente, tva, fournisseurPrincipal, fournisseursSecondaires,
-              derniereEntree, derniereSortie, statut
-            )
-            SELECT
-              nom, description, categorie, marque, imageUrl, sku, codeBarres, unite,
-              quantiteStock, quantiteAvariee, stockMin, stockMax, seuilAlerte, variantes,
-              prixAchat, prixVente, tva, fournisseurPrincipal, fournisseursSecondaires,
-              derniereEntree, derniereSortie, statut
-            FROM produits
-          ''');
-          await db.execute('DROP TABLE produits');
-          await db.execute('ALTER TABLE produits_new RENAME TO produits');
-
-          await db.execute('''
-            CREATE TABLE suppliers_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              productName TEXT NOT NULL,
-              category TEXT NOT NULL,
-              price REAL NOT NULL
-            )
-          ''');
-          await db.execute('''
-            INSERT INTO suppliers_new (name, productName, category, price)
-            SELECT name, productName, category, price
-            FROM suppliers
-          ''');
-          await db.execute('DROP TABLE suppliers');
-          await db.execute('ALTER TABLE suppliers_new RENAME TO suppliers');
-
-          await db.execute('''
-            CREATE TABLE users_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              name TEXT NOT NULL,
-              role TEXT NOT NULL
-            )
-          ''');
-          await db.execute('''
-            INSERT INTO users_new (name, role)
-            SELECT name, role
-            FROM users
-          ''');
-          await db.execute('DROP TABLE users');
-          await db.execute('ALTER TABLE users_new RENAME TO users');
-
-          await db.execute('''
-            CREATE TABLE historique_avaries_new (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              produitId INTEGER NOT NULL,
-              produitNom TEXT NOT NULL,
-              quantite INTEGER NOT NULL,
-              action TEXT NOT NULL,
-              utilisateur TEXT NOT NULL,
-              date INTEGER NOT NULL,
-              FOREIGN KEY (produitId) REFERENCES produits(id)
-            )
-          ''');
-          await db.execute('''
-            INSERT INTO historique_avaries_new (
-              produitId, produitNom, quantite, action, utilisateur, date
-            )
-            SELECT
-              CAST(produitId AS INTEGER), 'Inconnu', quantite, action, utilisateur, date
-            FROM historique_avaries
-          ''');
-          await db.execute('DROP TABLE historique_avaries');
-          await db.execute('ALTER TABLE historique_avaries_new RENAME TO historique_avaries');
-        }
-        if (oldVersion < 5) {
-          print('Migration vers version 5 : ajout des tables pour facturation');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS clients (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              nom TEXT NOT NULL,
-              email TEXT,
-              telephone TEXT,
-              adresse TEXT
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS bons_commande (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              clientId INTEGER NOT NULL,
-              date INTEGER NOT NULL,
-              statut TEXT NOT NULL,
-              FOREIGN KEY (clientId) REFERENCES clients(id)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS bon_commande_items (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              bonCommandeId INTEGER NOT NULL,
-              produitId INTEGER NOT NULL,
-              quantite INTEGER NOT NULL,
-              prixUnitaire REAL NOT NULL,
-              FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
-              FOREIGN KEY (produitId) REFERENCES produits(id)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS factures (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              numero TEXT NOT NULL,
-              bonCommandeId INTEGER NOT NULL,
-              clientId INTEGER NOT NULL,
-              date INTEGER NOT NULL,
-              total REAL NOT NULL,
-              statutPaiement TEXT NOT NULL,
-              FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
-              FOREIGN KEY (clientId) REFERENCES clients(id)
-            )
-          ''');
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS paiements (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              factureId INTEGER NOT NULL,
-              montant REAL NOT NULL,
-              date INTEGER NOT NULL,
-              methode TEXT NOT NULL,
-              FOREIGN KEY (factureId) REFERENCES factures(id)
-            )
-          ''');
-        }
-      },
-    );
-  }
-
   Future<bool> _checkProductExists(String nom, {int? excludeId}) async {
-    final List<Map<String, dynamic>> maps = await _database.query(
-      'produits',
-      where: excludeId != null ? 'nom = ? AND id != ?' : 'nom = ?',
-      whereArgs: excludeId != null ? [nom, excludeId] : [nom],
-    );
-    return maps.isNotEmpty;
+    final produits = await DatabaseHelper.getProduits();
+    return produits.any((p) => p.nom == nom && (excludeId == null || p.id != excludeId));
   }
 
   Future<void> _addProduct() async {
@@ -394,7 +90,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       }
 
       final produit = Produit(
-        id: 0, // SQLite will auto-increment
+        id: 0,
         nom: _nom,
         description: _description,
         categorie: _categorie,
@@ -420,31 +116,35 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
       try {
         print('Tentative d\'insertion du produit : $_nom');
-        await _database.insert('produits', produit.toMap(),
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        await DatabaseHelper.addProduit(produit);
         print('Produit inséré avec succès : $_nom');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produit ajouté avec succès')),
+          );
+          Navigator.pop(context);
+          setState(() {
+            _produitsFuture = DatabaseHelper.getProduits();
+          });
+        }
       } catch (e) {
         print('Erreur lors de l\'insertion du produit : $e');
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Erreur'),
-            content: Text('Erreur lors de l\'insertion : $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Erreur'),
+              content: Text('Erreur lors de l\'insertion : $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
       }
-      Navigator.pop(context);
-      setState(() {
-        _id = 0;
-        _produitsFuture = _getProducts();
-      });
     } else {
       print('Échec de la validation du formulaire.');
     }
@@ -500,34 +200,35 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
       try {
         print('Tentative de mise à jour du produit : $_nom');
-        await _database.update(
-          'produits',
-          produit.toMap(),
-          where: 'id = ?',
-          whereArgs: [produit.id],
-        );
+        await DatabaseHelper.updateProduit(produit);
         print('Produit mis à jour avec succès : $_nom');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produit mis à jour avec succès')),
+          );
+          Navigator.pop(context);
+          setState(() {
+            _produitsFuture = DatabaseHelper.getProduits();
+          });
+        }
       } catch (e) {
         print('Erreur lors de la mise à jour du produit : $e');
-        await showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: const Text('Erreur'),
-            content: Text('Erreur lors de la mise à jour : $e'),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('OK'),
-              ),
-            ],
-          ),
-        );
-        return;
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Erreur'),
+              content: Text('Erreur lors de la mise à jour : $e'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
       }
-      Navigator.pop(context);
-      setState(() {
-        _produitsFuture = _getProducts();
-      });
     } else {
       print('Échec de la validation du formulaire.');
     }
@@ -544,10 +245,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
         utilisateur: utilisateur,
         date: DateTime.now().millisecondsSinceEpoch,
       );
-      await _database.insert('historique_avaries', log.toMap());
+      await DatabaseHelper.addDamagedAction(log);
       print('Action enregistrée dans historique_avaries : $action pour produit $produitId');
     } catch (e) {
       print('Erreur lors de l\'enregistrement dans historique_avaries : $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de l\'enregistrement : $e')),
+        );
+      }
     }
   }
 
@@ -604,25 +310,49 @@ class _ProductsScreenState extends State<ProductsScreen> {
               if (formKey.currentState!.validate()) {
                 formKey.currentState!.save();
                 try {
-                  await _database.update(
-                    'produits',
-                    {
-                      'quantiteStock': produit.quantiteStock - quantiteADeclarer,
-                      'quantiteAvariee': produit.quantiteAvariee + quantiteADeclarer,
-                    },
-                    where: 'id = ?',
-                    whereArgs: [produit.id],
+                  final updatedProduit = Produit(
+                    id: produit.id,
+                    nom: produit.nom,
+                    description: produit.description,
+                    categorie: produit.categorie,
+                    marque: produit.marque,
+                    imageUrl: produit.imageUrl,
+                    sku: produit.sku,
+                    codeBarres: produit.codeBarres,
+                    unite: produit.unite,
+                    quantiteStock: produit.quantiteStock - quantiteADeclarer,
+                    quantiteAvariee: produit.quantiteAvariee + quantiteADeclarer,
+                    stockMin: produit.stockMin,
+                    stockMax: produit.stockMax,
+                    seuilAlerte: produit.seuilAlerte,
+                    variantes: produit.variantes,
+                    prixAchat: produit.prixAchat,
+                    prixVente: produit.prixVente,
+                    tva: produit.tva,
+                    fournisseurPrincipal: produit.fournisseurPrincipal,
+                    fournisseursSecondaires: produit.fournisseursSecondaires,
+                    derniereEntree: produit.derniereEntree,
+                    derniereSortie: produit.derniereSortie,
+                    statut: produit.statut,
                   );
+                  await DatabaseHelper.updateProduit(updatedProduit);
                   await _logDamagedAction(produit.id, produit.nom, quantiteADeclarer, 'declare', 'Admin');
-                  Navigator.pop(context);
-                  setState(() {
-                    _produitsFuture = _getProducts();
-                  });
+                  if (mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Produits avariés déclarés')),
+                    );
+                    setState(() {
+                      _produitsFuture = DatabaseHelper.getProduits();
+                    });
+                  }
                 } catch (e) {
                   print('Erreur lors de la déclaration d\'avarie : $e');
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erreur lors de la déclaration : $e')),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Erreur lors de la déclaration : $e')),
+                    );
+                  }
                 }
               }
             },
@@ -636,51 +366,84 @@ class _ProductsScreenState extends State<ProductsScreen> {
   Future<void> _handleDamagedAction(Produit produit, String action) async {
     try {
       if (action == 'retour') {
-        await _database.update(
-          'produits',
-          {
-            'quantiteAvariee': 0,
-            'quantiteStock': produit.quantiteStock + produit.quantiteAvariee,
-          },
-          where: 'id = ?',
-          whereArgs: [produit.id],
+        final updatedProduit = Produit(
+          id: produit.id,
+          nom: produit.nom,
+          description: produit.description,
+          categorie: produit.categorie,
+          marque: produit.marque,
+          imageUrl: produit.imageUrl,
+          sku: produit.sku,
+          codeBarres: produit.codeBarres,
+          unite: produit.unite,
+          quantiteStock: produit.quantiteStock + produit.quantiteAvariee,
+          quantiteAvariee: 0,
+          stockMin: produit.stockMin,
+          stockMax: produit.stockMax,
+          seuilAlerte: produit.seuilAlerte,
+          variantes: produit.variantes,
+          prixAchat: produit.prixAchat,
+          prixVente: produit.prixVente,
+          tva: produit.tva,
+          fournisseurPrincipal: produit.fournisseurPrincipal,
+          fournisseursSecondaires: produit.fournisseursSecondaires,
+          derniereEntree: produit.derniereEntree,
+          derniereSortie: produit.derniereSortie,
+          statut: produit.statut,
         );
+        await DatabaseHelper.updateProduit(updatedProduit);
         await _logDamagedAction(produit.id, produit.nom, produit.quantiteAvariee, 'retour', 'Admin');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Produits avariés retournés au fournisseur')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produits avariés retournés au fournisseur')),
+          );
+        }
       } else if (action == 'detruit') {
-        await _database.update(
-          'produits',
-          {'quantiteAvariee': 0},
-          where: 'id = ?',
-          whereArgs: [produit.id],
+        final updatedProduit = Produit(
+          id: produit.id,
+          nom: produit.nom,
+          description: produit.description,
+          categorie: produit.categorie,
+          marque: produit.marque,
+          imageUrl: produit.imageUrl,
+          sku: produit.sku,
+          codeBarres: produit.codeBarres,
+          unite: produit.unite,
+          quantiteStock: produit.quantiteStock,
+          quantiteAvariee: 0,
+          stockMin: produit.stockMin,
+          stockMax: produit.stockMax,
+          seuilAlerte: produit.seuilAlerte,
+          variantes: produit.variantes,
+          prixAchat: produit.prixAchat,
+          prixVente: produit.prixVente,
+          tva: produit.tva,
+          fournisseurPrincipal: produit.fournisseurPrincipal,
+          fournisseursSecondaires: produit.fournisseursSecondaires,
+          derniereEntree: produit.derniereEntree,
+          derniereSortie: produit.derniereSortie,
+          statut: produit.statut,
         );
+        await DatabaseHelper.updateProduit(updatedProduit);
         await _logDamagedAction(produit.id, produit.nom, produit.quantiteAvariee, 'detruit', 'Admin');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Produits avariés marqués comme détruits')),
-        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Produits avariés marqués comme détruits')),
+          );
+        }
       }
-      setState(() {
-        _produitsFuture = _getProducts();
-      });
+      if (mounted) {
+        setState(() {
+          _produitsFuture = DatabaseHelper.getProduits();
+        });
+      }
     } catch (e) {
       print('Erreur lors de l\'action sur les avaries : $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur lors de l\'action : $e')),
-      );
-    }
-  }
-
-  Future<List<Produit>> _getProducts() async {
-    print('Récupération des produits...');
-    try {
-      final List<Map<String, dynamic>> maps = await _database.query('produits');
-      print('Produits récupérés : ${maps.length}');
-      return List.generate(maps.length, (i) => Produit.fromMap(maps[i]));
-    } catch (e) {
-      print('Erreur lors de la récupération des produits : $e');
-      return [];
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur lors de l\'action : $e')),
+        );
+      }
     }
   }
 

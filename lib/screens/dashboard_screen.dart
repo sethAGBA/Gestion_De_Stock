@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 import '../helpers/database_helper.dart';
 import '../widgets/products_table_widget.dart';
 import '../widgets/sidebar_widget.dart';
@@ -18,6 +20,7 @@ import '../models/models.dart';
 import '../widgets/stock_movements_chart_widget.dart';
 import '../widgets/suppliers_table_widget.dart';
 import '../widgets/users_table_widget.dart';
+import 'login_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -51,9 +54,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _refreshData();
     } catch (e) {
       print('Erreur dans _initDatabase : $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur de base de données : $e')),
-      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur de base de données : $e')),
+        );
+      }
     }
   }
 
@@ -125,16 +130,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         },
       ),
-       ProductsScreen(),
-       EntriesScreen(),
-       ExitsScreen(),
+      const ProductsScreen(),
+      const EntriesScreen(),
+      const ExitsScreen(),
        InventoryScreen(),
        SuppliersScreen(),
-       UsersScreen(),
-       SalesScreen(),
-       AlertsScreen(),
+      const UsersScreen(),
+      const SalesScreen(),
+      const AlertsScreen(),
        SettingsScreen(),
-       DamagedHistoryScreen(),
+      const DamagedHistoryScreen(),
     ];
   }
 
@@ -159,52 +164,62 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isSmallScreen = screenWidth < 1200;
-    final isVerySmallScreen = screenWidth < 800;
-    final theme = Theme.of(context);
-    final isDarkMode = theme.brightness == Brightness.dark;
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        if (!authProvider.isAuthenticated) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            Navigator.pushReplacementNamed(context, '/login');
+          });
+          return const SizedBox.shrink();
+        }
 
-    return ConstrainedBox(
-      constraints: const BoxConstraints(minWidth: 800),
-      child: Scaffold(
-        body: Row(
-          children: [
-            if (!isVerySmallScreen)
-              SidebarWidget(onItemTapped: _onItemTapped),
-            Expanded(
-              child: Container(
-                color: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade100,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    AppBarWidget(
-                      isSmallScreen: isVerySmallScreen,
-                      onMenuPressed: isVerySmallScreen
-                          ? () => Scaffold.of(context).openDrawer()
-                          : null,
+        final screenWidth = MediaQuery.of(context).size.width;
+        final isSmallScreen = screenWidth < 1200;
+        final isVerySmallScreen = screenWidth < 800;
+        final theme = Theme.of(context);
+        final isDarkMode = theme.brightness == Brightness.dark;
+
+        return ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 800),
+          child: Scaffold(
+            body: Row(
+              children: [
+                if (!isVerySmallScreen)
+                  SidebarWidget(onItemTapped: _onItemTapped),
+                Expanded(
+                  child: Container(
+                    color: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade100,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AppBarWidget(
+                          isSmallScreen: isVerySmallScreen,
+                          onMenuPressed: isVerySmallScreen
+                              ? () => Scaffold.of(context).openDrawer()
+                              : null,
+                          onLogout: () {
+                            authProvider.logout();
+                            Navigator.pushReplacementNamed(context, '/login');
+                          },
+                        ),
+                        Expanded(
+                          child: IndexedStack(
+                            index: _selectedIndex,
+                            children: _screens,
+                          ),
+                        ),
+                      ],
                     ),
-                    Expanded(
-                      child: IndexedStack(
-                        index: _selectedIndex,
-                        children: _screens,
-                      ),
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-        drawer: isVerySmallScreen
-            ? Drawer(child: SidebarWidget(onItemTapped: _onItemTapped))
-            : null,
-        // floatingActionButton: FloatingActionButton(
-        //   onPressed: _navigateToSalesScreen,
-        //   // child: const Icon(Icons.receipt),
-        //   tooltip: 'Gérer les ventes',
-        // ),
-      ),
+            drawer: isVerySmallScreen
+                ? Drawer(child: SidebarWidget(onItemTapped: _onItemTapped))
+                : null,
+          ),
+        );
+      },
     );
   }
 }

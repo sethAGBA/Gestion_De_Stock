@@ -3,11 +3,13 @@ import 'package:flutter/material.dart';
 class AppBarWidget extends StatelessWidget {
   final bool isSmallScreen;
   final VoidCallback? onMenuPressed;
+  final VoidCallback? onLogout;
 
   const AppBarWidget({
     Key? key,
     required this.isSmallScreen,
     this.onMenuPressed,
+    this.onLogout,
   }) : super(key: key);
 
   @override
@@ -69,8 +71,9 @@ class AppBarWidget extends StatelessWidget {
           if (!isSmallScreen) const SizedBox(width: 16.0),
           if (!isSmallScreen)
             IconButton(
-              icon: const Icon(Icons.account_circle),
-              onPressed: () {},
+              icon: const Icon(Icons.logout),
+              tooltip: 'Déconnexion',
+              onPressed: onLogout,
             ),
         ],
       ),

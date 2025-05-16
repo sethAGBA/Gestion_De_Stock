@@ -4,11 +4,31 @@ import '../models/models.dart';
 
 class DatabaseHelper {
   static Database? _database;
+  static bool _isInitializing = false;
 
   static Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+    if (_database != null && await _database!.isOpen) {
+      return _database!;
+    }
+    if (_isInitializing) {
+      print('Waiting for database initialization...');
+      while (_isInitializing) {
+        await Future.delayed(const Duration(milliseconds: 10));
+      }
+      if (_database != null && await _database!.isOpen) {
+        return _database!;
+      }
+    }
+    _isInitializing = true;
+    try {
+      print('Initializing database...');
+      _database = await _initDatabase();
+      print('Database initialized: $_database');
+      return _database!;
+    } finally {
+      _isInitializing = false;
+      print('Initialization complete');
+    }
   }
 
   static Future<Database> _initDatabase() async {
@@ -16,7 +36,7 @@ class DatabaseHelper {
     print('Initialisation de la base de données à : $pathDb');
     return await openDatabase(
       pathDb,
-      version: 14, // Incremented to 14 for password column
+      version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
@@ -219,7 +239,7 @@ class DatabaseHelper {
       id: 0,
       name: 'Admin',
       role: 'Administrateur',
-      password: 'admin123', // Default password
+      password: 'admin123',
     ).toMap());
     await db.insert('clients', Client(
       id: 0,
@@ -474,6 +494,14 @@ class DatabaseHelper {
       );
     }
     print('Mise à jour terminée.');
+  }
+
+  static Future<void> closeDatabase() async {
+    if (_database != null && await _database!.isOpen) {
+      await _database!.close();
+      _database = null;
+      print('Database closed');
+    }
   }
 
   static Future<List<Produit>> getProduits() async {
