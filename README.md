@@ -1,18 +1,37 @@
 # stock_management
+# Gestion de Stock
 
-A new Flutter project.
+Application de gestion de stock développée avec Flutter.
 
-## Getting Started
+## Fonctionnalités
 
-This project is a starting point for a Flutter application.
+- Gestion des produits
+- Gestion des entrées/sorties
+- Gestion des utilisateurs
+- Gestion des fournisseurs
+- Génération de factures
+- Tableau de bord avec statistiques
+- Alertes de stock
 
-A few resources to get you started if this is your first Flutter project:
+## Installation
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+```bash
+# Cloner le projet
+git clone git@github.com:sethAGBA/Gestion_De_Stock.git
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+# Accéder au répertoire
+cd Gestion_De_Stock
+
+# Installer les dépendances
+flutter pub get
+
+# Lancer l'application
+flutter run
+```
+
+## Configuration requise
+
+- Flutter 3.0.0 ou supérieur
+- Dart 2.17.0 ou supérieur
 # Gestion_De_Stock
-# Gestion_De_Stock
+

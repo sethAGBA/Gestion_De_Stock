@@ -16,14 +16,14 @@ class DatabaseHelper {
     print('Initialisation de la base de données à : $pathDb');
     return await openDatabase(
       pathDb,
-      version: 10, // Incremented to version 10 for new migration
+      version: 14, // Incremented to 14 for password column
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
     );
   }
 
   static Future<void> _onCreate(Database db, int version) async {
-    print('Création des tables...');
+    print('Création des tables pour version $version...');
     await db.execute('''
       CREATE TABLE IF NOT EXISTS produits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -66,7 +66,8 @@ class DatabaseHelper {
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
-        role TEXT NOT NULL
+        role TEXT NOT NULL,
+        password TEXT NOT NULL
       )
     ''');
 
@@ -132,8 +133,9 @@ class DatabaseHelper {
         total REAL NOT NULL,
         statutPaiement TEXT NOT NULL,
         montantPaye REAL DEFAULT 0.0,
-        montantRemis REAL, -- Added for amount tendered
-        monnaie REAL, -- Added for change
+        montantRemis REAL,
+        monnaie REAL,
+        statut TEXT NOT NULL DEFAULT 'Active',
         FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
         FOREIGN KEY (clientId) REFERENCES clients(id)
       )
@@ -144,11 +146,64 @@ class DatabaseHelper {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         factureId INTEGER NOT NULL,
         montant REAL NOT NULL,
-        montantRemis REAL, -- Added for amount tendered
-        monnaie REAL, -- Added for change
+        montantRemis REAL,
+        monnaie REAL,
         date INTEGER NOT NULL,
         methode TEXT NOT NULL,
         FOREIGN KEY (factureId) REFERENCES factures(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS factures_archivees (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        facture_id INTEGER NOT NULL,
+        numero TEXT NOT NULL,
+        bonCommandeId INTEGER NOT NULL,
+        clientId INTEGER NOT NULL,
+        clientNom TEXT,
+        adresse TEXT,
+        vendeurNom TEXT,
+        magasinAdresse TEXT,
+        ristourne REAL DEFAULT 0.0,
+        date INTEGER NOT NULL,
+        total REAL NOT NULL,
+        statutPaiement TEXT NOT NULL,
+        montantPaye REAL DEFAULT 0.0,
+        montantRemis REAL,
+        monnaie REAL,
+        motif_annulation TEXT NOT NULL,
+        date_annulation INTEGER NOT NULL,
+        FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
+        FOREIGN KEY (clientId) REFERENCES clients(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS stock_exits (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        produitId INTEGER NOT NULL,
+        produitNom TEXT NOT NULL,
+        quantite INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        raison TEXT,
+        date INTEGER NOT NULL,
+        utilisateur TEXT NOT NULL,
+        FOREIGN KEY (produitId) REFERENCES produits(id)
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS stock_entries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        produitId INTEGER NOT NULL,
+        produitNom TEXT NOT NULL,
+        quantite INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        source TEXT,
+        date INTEGER NOT NULL,
+        utilisateur TEXT NOT NULL,
+        FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
 
@@ -164,6 +219,7 @@ class DatabaseHelper {
       id: 0,
       name: 'Admin',
       role: 'Administrateur',
+      password: 'admin123', // Default password
     ).toMap());
     await db.insert('clients', Client(
       id: 0,
@@ -347,6 +403,76 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE factures ADD COLUMN montantRemis REAL');
       await db.execute('ALTER TABLE factures ADD COLUMN monnaie REAL');
     }
+    if (oldVersion < 11) {
+      print('Migration vers version 11 : ajout de statut à factures et création de factures_archivees');
+      await db.execute('ALTER TABLE factures ADD COLUMN statut TEXT NOT NULL DEFAULT "Active"');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS factures_archivees (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          facture_id INTEGER NOT NULL,
+          numero TEXT NOT NULL,
+          bonCommandeId INTEGER NOT NULL,
+          clientId INTEGER NOT NULL,
+          clientNom TEXT,
+          adresse TEXT,
+          vendeurNom TEXT,
+          magasinAdresse TEXT,
+          ristourne REAL DEFAULT 0.0,
+          date INTEGER NOT NULL,
+          total REAL NOT NULL,
+          statutPaiement TEXT NOT NULL,
+          montantPaye REAL DEFAULT 0.0,
+          montantRemis REAL,
+          monnaie REAL,
+          motif_annulation TEXT NOT NULL,
+          date_annulation INTEGER NOT NULL,
+          FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
+          FOREIGN KEY (clientId) REFERENCES clients(id)
+        )
+      ''');
+    }
+    if (oldVersion < 12) {
+      print('Migration vers version 12 : création de stock_exits');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS stock_exits (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          produitId INTEGER NOT NULL,
+          produitNom TEXT NOT NULL,
+          quantite INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          raison TEXT,
+          date INTEGER NOT NULL,
+          utilisateur TEXT NOT NULL,
+          FOREIGN KEY (produitId) REFERENCES produits(id)
+        )
+      ''');
+    }
+    if (oldVersion < 13) {
+      print('Migration vers version 13 : création de stock_entries');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS stock_entries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          produitId INTEGER NOT NULL,
+          produitNom TEXT NOT NULL,
+          quantite INTEGER NOT NULL,
+          type TEXT NOT NULL,
+          source TEXT,
+          date INTEGER NOT NULL,
+          utilisateur TEXT NOT NULL,
+          FOREIGN KEY (produitId) REFERENCES produits(id)
+        )
+      ''');
+    }
+    if (oldVersion < 14) {
+      print('Migration vers version 14 : ajout de password à users');
+      await db.execute('ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT "password"');
+      await db.update(
+        'users',
+        {'password': 'admin123'},
+        where: 'name = ?',
+        whereArgs: ['Admin'],
+      );
+    }
     print('Mise à jour terminée.');
   }
 
@@ -389,6 +515,72 @@ class DatabaseHelper {
     }
   }
 
+  static Future<void> addUser(User user) async {
+    final db = await database;
+    try {
+      print('Ajout de l\'utilisateur : ${user.name}...');
+      await db.insert('users', user.toMap());
+      print('Utilisateur ajouté avec succès');
+    } catch (e) {
+      print('Erreur lors de l\'ajout de l\'utilisateur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> updateUser(User user) async {
+    final db = await database;
+    try {
+      print('Mise à jour de l\'utilisateur : ${user.name}...');
+      await db.update(
+        'users',
+        user.toMap(),
+        where: 'id = ?',
+        whereArgs: [user.id],
+      );
+      print('Utilisateur mis à jour avec succès');
+    } catch (e) {
+      print('Erreur lors de la mise à jour de l\'utilisateur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> deleteUser(int id) async {
+    final db = await database;
+    try {
+      print('Suppression de l\'utilisateur avec id : $id...');
+      await db.delete(
+        'users',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      print('Utilisateur supprimé avec succès');
+    } catch (e) {
+      print('Erreur lors de la suppression de l\'utilisateur : $e');
+      throw e;
+    }
+  }
+
+  static Future<User?> loginUser(String name, String password) async {
+    final db = await database;
+    try {
+      print('Tentative de connexion pour l\'utilisateur : $name...');
+      final List<Map<String, dynamic>> maps = await db.query(
+        'users',
+        where: 'name = ? AND password = ?',
+        whereArgs: [name, password],
+      );
+      if (maps.isEmpty) {
+        print('Échec de la connexion : utilisateur ou mot de passe incorrect');
+        return null;
+      }
+      print('Connexion réussie pour l\'utilisateur : $name');
+      return User.fromMap(maps.first);
+    } catch (e) {
+      print('Erreur lors de la connexion : $e');
+      return null;
+    }
+  }
+
   static Future<List<Client>> getClients() async {
     final db = await database;
     try {
@@ -402,16 +594,41 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<Facture>> getFactures() async {
+  static Future<List<Facture>> getFactures({bool includeArchived = false}) async {
     final db = await database;
     try {
       print('Récupération des factures...');
-      final List<Map<String, dynamic>> maps = await db.query('factures');
+      final List<Map<String, dynamic>> maps = await db.query(
+        'factures',
+        where: includeArchived ? null : 'statut = ?',
+        whereArgs: includeArchived ? null : ['Active'],
+      );
       print('Factures récupérées : ${maps.length}');
       return List.generate(maps.length, (i) => Facture.fromMap(maps[i]));
     } catch (e) {
       print('Erreur lors de la récupération des factures : $e');
       return [];
+    }
+  }
+
+  static Future<FactureArchivee?> getArchivedFacture(int factureId) async {
+    final db = await database;
+    try {
+      print('Récupération de la facture archivée pour factureId $factureId...');
+      final List<Map<String, dynamic>> maps = await db.query(
+        'factures_archivees',
+        where: 'facture_id = ?',
+        whereArgs: [factureId],
+      );
+      if (maps.isEmpty) {
+        print('Aucune facture archivée trouvée pour factureId $factureId');
+        return null;
+      }
+      print('Facture archivée récupérée : ${maps.first}');
+      return FactureArchivee.fromMap(maps.first);
+    } catch (e) {
+      print('Erreur lors de la récupération de la facture archivée : $e');
+      return null;
     }
   }
 
@@ -458,6 +675,107 @@ class DatabaseHelper {
       print('Paiement ajouté et montantPaye mis à jour : $totalPaye, statut: $statutPaiement');
     } catch (e) {
       print('Erreur lors de l\'ajout du paiement : $e');
+      throw e;
+    }
+  }
+
+  static Future<int> getTotalProductsSold() async {
+    final db = await database;
+    try {
+      print('Récupération du total des produits vendus...');
+      final result = await db.rawQuery('''
+        SELECT SUM(bci.quantite) as totalSold
+        FROM bon_commande_items bci
+        JOIN factures f ON f.bonCommandeId = bci.bonCommandeId
+        WHERE f.statut != 'Annulée'
+      ''');
+      final totalSold = (result.first['totalSold'] as num?)?.toInt() ?? 0;
+      print('Total produits vendus : $totalSold');
+      return totalSold;
+    } catch (e) {
+      print('Erreur lors de la récupération des produits vendus : $e');
+      return 0;
+    }
+  }
+
+  static Future<void> cancelFacture(int factureId, String motif) async {
+    final db = await database;
+    try {
+      print('Annulation de la facture $factureId...');
+      await db.transaction((txn) async {
+        final facture = await txn.query(
+          'factures',
+          where: 'id = ?',
+          whereArgs: [factureId],
+        );
+        if (facture.isEmpty) throw Exception('Facture non trouvée');
+        final factureData = facture.first;
+        if (factureData['statut'] == 'Annulée') throw Exception('Facture déjà annulée');
+
+        final bonCommandeId = factureData['bonCommandeId'] as int;
+
+        final items = await txn.query(
+          'bon_commande_items',
+          where: 'bonCommandeId = ?',
+          whereArgs: [bonCommandeId],
+        );
+
+        for (var item in items) {
+          final produitId = item['produitId'] as int;
+          final quantite = (item['quantite'] as num).toInt();
+          final produit = await txn.query(
+            'produits',
+            where: 'id = ?',
+            whereArgs: [produitId],
+          );
+          if (produit.isEmpty) throw Exception('Produit $produitId non trouvé');
+          final currentStock = (produit.first['quantiteStock'] as num).toInt();
+          await txn.update(
+            'produits',
+            {'quantiteStock': currentStock + quantite},
+            where: 'id = ?',
+            whereArgs: [produitId],
+          );
+          print('Stock restauré pour produit $produitId : +$quantite');
+        }
+
+        await txn.insert('factures_archivees', {
+          'facture_id': factureId,
+          'numero': factureData['numero'],
+          'bonCommandeId': factureData['bonCommandeId'],
+          'clientId': factureData['clientId'],
+          'clientNom': factureData['clientNom'],
+          'adresse': factureData['adresse'],
+          'vendeurNom': factureData['vendeurNom'],
+          'magasinAdresse': factureData['magasinAdresse'],
+          'ristourne': factureData['ristourne'],
+          'date': factureData['date'],
+          'total': factureData['total'],
+          'statutPaiement': factureData['statutPaiement'],
+          'montantPaye': factureData['montantPaye'],
+          'montantRemis': factureData['montantRemis'],
+          'monnaie': factureData['monnaie'],
+          'motif_annulation': motif,
+          'date_annulation': DateTime.now().millisecondsSinceEpoch,
+        });
+
+        await txn.update(
+          'factures',
+          {'statut': 'Annulée'},
+          where: 'id = ?',
+          whereArgs: [factureId],
+        );
+
+        await txn.delete(
+          'paiements',
+          where: 'factureId = ?',
+          whereArgs: [factureId],
+        );
+
+        print('Facture $factureId annulée et archivée avec succès');
+      });
+    } catch (e) {
+      print('Erreur lors de l\'annulation de la facture : $e');
       throw e;
     }
   }
@@ -600,6 +918,154 @@ class DatabaseHelper {
       return maps.map((map) => DamagedAction.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des actions d\'avarie : $e');
+      return [];
+    }
+  }
+
+  static Future<void> addStockExit(StockExit exit) async {
+    final db = await database;
+    try {
+      print('Ajout de la sortie de stock pour ${exit.produitNom}...');
+      await db.transaction((txn) async {
+        final produit = await txn.query(
+          'produits',
+          where: 'id = ?',
+          whereArgs: [exit.produitId],
+        );
+        if (produit.isEmpty) throw Exception('Produit non trouvé');
+        final currentStock = (produit.first['quantiteStock'] as num).toInt();
+        if (currentStock < exit.quantite) throw Exception('Stock insuffisant');
+        await txn.update(
+          'produits',
+          {'quantiteStock': currentStock - exit.quantite},
+          where: 'id = ?',
+          whereArgs: [exit.produitId],
+        );
+        await txn.insert('stock_exits', exit.toMap());
+      });
+      print('Sortie de stock ajoutée avec succès');
+    } catch (e) {
+      print('Erreur lors de l\'ajout de la sortie de stock : $e');
+      throw e;
+    }
+  }
+
+  static Future<List<StockExit>> getStockExits({String? typeFilter}) async {
+    final db = await database;
+    try {
+      print('Récupération des sorties de stock...');
+      final maps = await db.query(
+        'stock_exits',
+        where: typeFilter != null ? 'type = ?' : null,
+        whereArgs: typeFilter != null ? [typeFilter] : null,
+      );
+      print('Sorties de stock récupérées : ${maps.length}');
+      return maps.map((map) => StockExit.fromMap(map)).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des sorties de stock : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getAllExits({String? typeFilter}) async {
+    final db = await database;
+    try {
+      print('Récupération de toutes les sorties (ventes + autres)...');
+      List<Map<String, dynamic>> exits = [];
+
+      final stockExits = await db.query(
+        'stock_exits',
+        where: typeFilter != null && typeFilter != 'sale' ? 'type = ?' : null,
+        whereArgs: typeFilter != null && typeFilter != 'sale' ? [typeFilter] : null,
+      );
+      exits.addAll(stockExits.map((e) => {
+            'id': e['id'],
+            'produitId': e['produitId'],
+            'produitNom': e['produitNom'],
+            'quantite': e['quantite'],
+            'type': e['type'],
+            'raison': e['raison'],
+            'date': e['date'],
+            'utilisateur': e['utilisateur'],
+            'source': 'stock_exit',
+          }));
+
+      if (typeFilter == null || typeFilter == 'sale') {
+        final saleExits = await db.rawQuery('''
+          SELECT bci.id, bci.produitId, p.nom as produitNom, bci.quantite, 'sale' as type, 
+                 f.numero as raison, f.date, u.name as utilisateur
+          FROM bon_commande_items bci
+          JOIN factures f ON f.bonCommandeId = bci.bonCommandeId
+          JOIN produits p ON p.id = bci.produitId
+          JOIN users u ON u.id = (SELECT id FROM users LIMIT 1)
+          WHERE f.statut != 'Annulée'
+        ''');
+        exits.addAll(saleExits.map((e) => {
+              'id': e['id'],
+              'produitId': e['produitId'],
+              'produitNom': e['produitNom'],
+              'quantite': e['quantite'],
+              'type': e['type'],
+              'raison': e['raison'],
+              'date': e['date'],
+              'utilisateur': e['utilisateur'],
+              'source': 'sale',
+            }));
+      }
+
+      exits.sort((a, b) => (b['date'] as int).compareTo(a['date'] as int));
+      print('Total sorties récupérées : ${exits.length}');
+      return exits;
+    } catch (e) {
+      print('Erreur lors de la récupération des sorties : $e');
+      return [];
+    }
+  }
+
+  static Future<void> addStockEntry(StockEntry entry) async {
+    final db = await database;
+    try {
+      print('Ajout de l\'entrée de stock pour ${entry.produitNom}...');
+      await db.transaction((txn) async {
+        final produit = await txn.query(
+          'produits',
+          where: 'id = ?',
+          whereArgs: [entry.produitId],
+        );
+        if (produit.isEmpty) throw Exception('Produit non trouvé');
+        final currentStock = (produit.first['quantiteStock'] as num).toInt();
+        await txn.update(
+          'produits',
+          {
+            'quantiteStock': currentStock + entry.quantite,
+            'derniereEntree': entry.date.millisecondsSinceEpoch,
+          },
+          where: 'id = ?',
+          whereArgs: [entry.produitId],
+        );
+        await txn.insert('stock_entries', entry.toMap());
+      });
+      print('Entrée de stock ajoutée avec succès');
+    } catch (e) {
+      print('Erreur lors de l\'ajout de l\'entrée de stock : $e');
+      throw e;
+    }
+  }
+
+  static Future<List<StockEntry>> getStockEntries({String? typeFilter}) async {
+    final db = await database;
+    try {
+      print('Récupération des entrées de stock...');
+      final maps = await db.query(
+        'stock_entries',
+        where: typeFilter != null ? 'type = ?' : null,
+        whereArgs: typeFilter != null ? [typeFilter] : null,
+        orderBy: 'date DESC',
+      );
+      print('Entrées de stock récupérées : ${maps.length}');
+      return maps.map((map) => StockEntry.fromMap(map)).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des entrées de stock : $e');
       return [];
     }
   }

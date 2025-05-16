@@ -167,11 +167,13 @@ class User {
   final int id;
   final String name;
   final String role;
+  final String password;
 
   User({
     required this.id,
     required this.name,
     required this.role,
+    required this.password,
   });
 
   Map<String, dynamic> toMap() {
@@ -179,6 +181,7 @@ class User {
       'id': id == 0 ? null : id,
       'name': name,
       'role': role,
+      'password': password,
     };
   }
 
@@ -187,6 +190,7 @@ class User {
       id: (map['id'] as num?)?.toInt() ?? 0,
       name: map['name'] as String? ?? '',
       role: map['role'] as String? ?? '',
+      password: map['password'] as String? ?? '',
     );
   }
 }
@@ -321,6 +325,7 @@ class Facture {
   final double? montantPaye;
   final double? montantRemis;
   final double? monnaie;
+  final String statut;
 
   Facture({
     required this.id,
@@ -338,6 +343,7 @@ class Facture {
     this.montantPaye,
     this.montantRemis,
     this.monnaie,
+    this.statut = 'Active',
   });
 
   Map<String, dynamic> toMap() {
@@ -357,6 +363,7 @@ class Facture {
       'montantPaye': montantPaye,
       'montantRemis': montantRemis,
       'monnaie': monnaie,
+      'statut': statut,
     };
   }
 
@@ -377,6 +384,95 @@ class Facture {
       montantPaye: (map['montantPaye'] as num?)?.toDouble(),
       montantRemis: (map['montantRemis'] as num?)?.toDouble(),
       monnaie: (map['monnaie'] as num?)?.toDouble(),
+      statut: map['statut'] as String? ?? 'Active',
+    );
+  }
+}
+
+class FactureArchivee {
+  final int id;
+  final int factureId;
+  final String numero;
+  final int bonCommandeId;
+  final int clientId;
+  final String? clientNom;
+  final String? adresse;
+  final String? vendeurNom;
+  final String? magasinAdresse;
+  final double ristourne;
+  final DateTime date;
+  final double total;
+  final String statutPaiement;
+  final double montantPaye;
+  final double? montantRemis;
+  final double? monnaie;
+  final String motifAnnulation;
+  final DateTime dateAnnulation;
+
+  FactureArchivee({
+    required this.id,
+    required this.factureId,
+    required this.numero,
+    required this.bonCommandeId,
+    required this.clientId,
+    this.clientNom,
+    this.adresse,
+    this.vendeurNom,
+    this.magasinAdresse,
+    required this.ristourne,
+    required this.date,
+    required this.total,
+    required this.statutPaiement,
+    required this.montantPaye,
+    this.montantRemis,
+    this.monnaie,
+    required this.motifAnnulation,
+    required this.dateAnnulation,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'facture_id': factureId,
+      'numero': numero,
+      'bonCommandeId': bonCommandeId,
+      'clientId': clientId,
+      'clientNom': clientNom,
+      'adresse': adresse,
+      'vendeurNom': vendeurNom,
+      'magasinAdresse': magasinAdresse,
+      'ristourne': ristourne,
+      'date': date.millisecondsSinceEpoch,
+      'total': total,
+      'statutPaiement': statutPaiement,
+      'montantPaye': montantPaye,
+      'montantRemis': montantRemis,
+      'monnaie': monnaie,
+      'motif_annulation': motifAnnulation,
+      'date_annulation': dateAnnulation.millisecondsSinceEpoch,
+    };
+  }
+
+  factory FactureArchivee.fromMap(Map<String, dynamic> map) {
+    return FactureArchivee(
+      id: map['id'] as int,
+      factureId: map['facture_id'] as int,
+      numero: map['numero'] as String,
+      bonCommandeId: map['bonCommandeId'] as int,
+      clientId: map['clientId'] as int,
+      clientNom: map['clientNom'] as String?,
+      adresse: map['adresse'] as String?,
+      vendeurNom: map['vendeurNom'] as String?,
+      magasinAdresse: map['magasinAdresse'] as String?,
+      ristourne: (map['ristourne'] as num?)?.toDouble() ?? 0.0,
+      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
+      total: (map['total'] as num).toDouble(),
+      statutPaiement: map['statutPaiement'] as String,
+      montantPaye: (map['montantPaye'] as num?)?.toDouble() ?? 0.0,
+      montantRemis: (map['montantRemis'] as num?)?.toDouble(),
+      monnaie: (map['monnaie'] as num?)?.toDouble(),
+      motifAnnulation: map['motif_annulation'] as String,
+      dateAnnulation: DateTime.fromMillisecondsSinceEpoch(map['date_annulation'] as int),
     );
   }
 }
@@ -466,5 +562,101 @@ class DamagedAction {
       utilisateur: map['utilisateur'] as String? ?? '',
       date: (map['date'] as num?)?.toInt() ?? 0,
     );
+  }
+}
+
+class StockExit {
+  final int? id;
+  final int produitId;
+  final String produitNom;
+  final int quantite;
+  final String type;
+  final String? raison;
+  final DateTime date;
+  final String utilisateur;
+
+  StockExit({
+    this.id,
+    required this.produitId,
+    required this.produitNom,
+    required this.quantite,
+    required this.type,
+    this.raison,
+    required this.date,
+    required this.utilisateur,
+  });
+
+  factory StockExit.fromMap(Map<String, dynamic> map) {
+    return StockExit(
+      id: map['id'] as int?,
+      produitId: map['produitId'] as int,
+      produitNom: map['produitNom'] as String,
+      quantite: map['quantite'] as int,
+      type: map['type'] as String,
+      raison: map['raison'] as String?,
+      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
+      utilisateur: map['utilisateur'] as String,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'produitId': produitId,
+      'produitNom': produitNom,
+      'quantite': quantite,
+      'type': type,
+      'raison': raison,
+      'date': date.millisecondsSinceEpoch,
+      'utilisateur': utilisateur,
+    };
+  }
+}
+
+class StockEntry {
+  final int? id;
+  final int produitId;
+  final String produitNom;
+  final int quantite;
+  final String type;
+  final String? source;
+  final DateTime date;
+  final String utilisateur;
+
+  StockEntry({
+    this.id,
+    required this.produitId,
+    required this.produitNom,
+    required this.quantite,
+    required this.type,
+    this.source,
+    required this.date,
+    required this.utilisateur,
+  });
+
+  factory StockEntry.fromMap(Map<String, dynamic> map) {
+    return StockEntry(
+      id: map['id'] as int?,
+      produitId: map['produitId'] as int,
+      produitNom: map['produitNom'] as String,
+      quantite: map['quantite'] as int,
+      type: map['type'] as String,
+      source: map['source'] as String?,
+      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
+      utilisateur: map['utilisateur'] as String,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'produitId': produitId,
+      'produitNom': produitNom,
+      'quantite': quantite,
+      'type': type,
+      'source': source,
+      'date': date.millisecondsSinceEpoch,
+      'utilisateur': utilisateur,
+    };
   }
 }

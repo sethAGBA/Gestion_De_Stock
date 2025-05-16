@@ -1,0 +1,4 @@
+rm -rf ~/Library/Containers/com.example.stockManagement/Data/Documents/dashboard.db
+flutter clean
+flutter pub get
+flutter run -d macos

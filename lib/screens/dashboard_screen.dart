@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:stock_management/helpers/database_helper.dart';
+import '../helpers/database_helper.dart';
 import '../widgets/products_table_widget.dart';
 import '../widgets/sidebar_widget.dart';
 import '../widgets/appbar_widget.dart';
@@ -30,6 +30,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late Future<List<Produit>> _produitsFuture;
   late Future<List<Supplier>> _suppliersFuture;
   late Future<List<User>> _usersFuture;
+  late Future<int> _productsSoldFuture;
   final List<String> months = ['Mai', 'Juin', 'Juillet', 'Août', 'Octobre'];
   int _selectedIndex = 0;
 
@@ -39,24 +40,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _produitsFuture = Future.value([]);
     _suppliersFuture = Future.value([]);
     _usersFuture = Future.value([]);
-    _initDatabase().then((_) {
-      setState(() {
-        _produitsFuture = DatabaseHelper.getProduits();
-        _suppliersFuture = DatabaseHelper.getSuppliers();
-        _usersFuture = DatabaseHelper.getUsers();
-      });
-    }).catchError((e) {
-      print('Erreur lors de l\'initialisation de la base de données : $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Erreur d\'initialisation : $e')),
-      );
-    });
+    _productsSoldFuture = Future.value(0);
+    _initDatabase();
   }
 
   Future<void> _initDatabase() async {
     try {
       print('Initialisation de la base de données...');
       await DatabaseHelper.database;
+      _refreshData();
     } catch (e) {
       print('Erreur dans _initDatabase : $e');
       ScaffoldMessenger.of(context).showSnackBar(
@@ -65,13 +57,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
     }
   }
 
+  void _refreshData() {
+    setState(() {
+      _produitsFuture = DatabaseHelper.getProduits();
+      _suppliersFuture = DatabaseHelper.getSuppliers();
+      _usersFuture = DatabaseHelper.getUsers();
+      _productsSoldFuture = DatabaseHelper.getTotalProductsSold();
+    });
+  }
+
   List<Widget> get _screens {
     return [
       FutureBuilder<List<Produit>>(
         future: _produitsFuture,
         builder: (context, produitSnapshot) {
           if (produitSnapshot.connectionState == ConnectionState.waiting) {
-            return Center(child: CircularProgressIndicator());
+            return const Center(child: CircularProgressIndicator());
           }
           if (produitSnapshot.hasError) {
             return Center(child: Text('Erreur : ${produitSnapshot.error}'));
@@ -80,7 +81,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             future: _suppliersFuture,
             builder: (context, supplierSnapshot) {
               if (supplierSnapshot.connectionState == ConnectionState.waiting) {
-                return Center(child: CircularProgressIndicator());
+                return const Center(child: CircularProgressIndicator());
               }
               if (supplierSnapshot.hasError) {
                 return Center(child: Text('Erreur : ${supplierSnapshot.error}'));
@@ -89,19 +90,34 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 future: _usersFuture,
                 builder: (context, userSnapshot) {
                   if (userSnapshot.connectionState == ConnectionState.waiting) {
-                    return Center(child: CircularProgressIndicator());
+                    return const Center(child: CircularProgressIndicator());
                   }
                   if (userSnapshot.hasError) {
                     return Center(child: Text('Erreur : ${userSnapshot.error}'));
                   }
-                  if (!produitSnapshot.hasData || !supplierSnapshot.hasData || !userSnapshot.hasData) {
-                    return Center(child: Text('Aucune donnée disponible'));
-                  }
-                  return DashboardContent(
-                    produits: produitSnapshot.data!,
-                    suppliers: supplierSnapshot.data!,
-                    months: months,
-                    users: userSnapshot.data!,
+                  return FutureBuilder<int>(
+                    future: _productsSoldFuture,
+                    builder: (context, productsSoldSnapshot) {
+                      if (productsSoldSnapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (productsSoldSnapshot.hasError) {
+                        return Center(child: Text('Erreur : ${productsSoldSnapshot.error}'));
+                      }
+                      if (!produitSnapshot.hasData ||
+                          !supplierSnapshot.hasData ||
+                          !userSnapshot.hasData ||
+                          !productsSoldSnapshot.hasData) {
+                        return const Center(child: Text('Aucune donnée disponible'));
+                      }
+                      return DashboardContent(
+                        produits: produitSnapshot.data!,
+                        suppliers: supplierSnapshot.data!,
+                        months: months,
+                        users: userSnapshot.data!,
+                        productsSold: productsSoldSnapshot.data!,
+                      );
+                    },
                   );
                 },
               );
@@ -109,16 +125,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
           );
         },
       ),
-      ProductsScreen(),
-      EntriesScreen(),
-      ExitsScreen(),
-      InventoryScreen(),
-      SuppliersScreen(),
-      UsersScreen(),
-      SalesScreen(),
-      AlertsScreen(),
-      SettingsScreen(),
-      DamagedHistoryScreen(),
+       ProductsScreen(),
+       EntriesScreen(),
+       ExitsScreen(),
+       InventoryScreen(),
+       SuppliersScreen(),
+       UsersScreen(),
+       SalesScreen(),
+       AlertsScreen(),
+       SettingsScreen(),
+       DamagedHistoryScreen(),
     ];
   }
 
@@ -126,11 +142,19 @@ class _DashboardScreenState extends State<DashboardScreen> {
     setState(() {
       _selectedIndex = index;
       if (_selectedIndex == 0) {
-        _produitsFuture = DatabaseHelper.getProduits();
-        _suppliersFuture = DatabaseHelper.getSuppliers();
-        _usersFuture = DatabaseHelper.getUsers();
+        _refreshData();
       }
     });
+  }
+
+  void _navigateToSalesScreen() async {
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const SalesScreen()),
+    );
+    if (result == 'refresh') {
+      _refreshData();
+    }
   }
 
   @override
@@ -146,7 +170,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
       child: Scaffold(
         body: Row(
           children: [
-            if (!isVerySmallScreen) SidebarWidget(onItemTapped: _onItemTapped),
+            if (!isVerySmallScreen)
+              SidebarWidget(onItemTapped: _onItemTapped),
             Expanded(
               child: Container(
                 color: isDarkMode ? Colors.grey.shade900 : Colors.grey.shade100,
@@ -171,7 +196,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
           ],
         ),
-        drawer: isVerySmallScreen ? Drawer(child: SidebarWidget(onItemTapped: _onItemTapped)) : null,
+        drawer: isVerySmallScreen
+            ? Drawer(child: SidebarWidget(onItemTapped: _onItemTapped))
+            : null,
+        // floatingActionButton: FloatingActionButton(
+        //   onPressed: _navigateToSalesScreen,
+        //   // child: const Icon(Icons.receipt),
+        //   tooltip: 'Gérer les ventes',
+        // ),
       ),
     );
   }
@@ -182,6 +214,7 @@ class DashboardContent extends StatelessWidget {
   final List<Supplier> suppliers;
   final List<String> months;
   final List<User> users;
+  final int productsSold;
 
   const DashboardContent({
     Key? key,
@@ -189,6 +222,7 @@ class DashboardContent extends StatelessWidget {
     required this.suppliers,
     required this.months,
     required this.users,
+    required this.productsSold,
   }) : super(key: key);
 
   @override
@@ -234,9 +268,11 @@ class DashboardContent extends StatelessWidget {
                 totalProducts: produits.length,
                 outOfStock: produits.where((p) => p.quantiteStock <= p.stockMin).length,
                 stockValue: produits.isNotEmpty
-                    ? produits.map((p) => (p.prixVente) * p.quantiteStock).reduce((a, b) => a + b)
+                    ? produits
+                        .map((p) => (p.prixVente) * p.quantiteStock)
+                        .reduce((a, b) => a + b)
                     : 0.0,
-                productsSold: 320,
+                productsSold: productsSold,
                 screenWidth: screenWidth,
               ),
             ),
