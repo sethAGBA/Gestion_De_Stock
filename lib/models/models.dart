@@ -620,7 +620,7 @@ class StockEntry {
   final int quantite;
   final String type;
   final String? source;
-  final DateTime date;
+  final int date;  // Stocké en millisecondes depuis epoch
   final String utilisateur;
 
   StockEntry({
@@ -634,18 +634,8 @@ class StockEntry {
     required this.utilisateur,
   });
 
-  factory StockEntry.fromMap(Map<String, dynamic> map) {
-    return StockEntry(
-      id: map['id'] as int?,
-      produitId: map['produitId'] as int,
-      produitNom: map['produitNom'] as String,
-      quantite: map['quantite'] as int,
-      type: map['type'] as String,
-      source: map['source'] as String?,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      utilisateur: map['utilisateur'] as String,
-    );
-  }
+  // Convertit les millisecondes en DateTime pour l'affichage
+  DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(date);
 
   Map<String, dynamic> toMap() {
     return {
@@ -655,8 +645,22 @@ class StockEntry {
       'quantite': quantite,
       'type': type,
       'source': source,
-      'date': date.millisecondsSinceEpoch,
+      'date': date,
       'utilisateur': utilisateur,
     };
   }
+
+  factory StockEntry.fromMap(Map<String, dynamic> map) {
+    return StockEntry(
+      id: map['id'] as int?,
+      produitId: map['produitId'] as int,
+      produitNom: map['produitNom'] as String,
+      quantite: map['quantite'] as int,
+      type: map['type'] as String,
+      source: map['source'] as String?,
+      date: map['date'] as int,
+      utilisateur: map['utilisateur'] as String,
+    );
+  }
+
 }

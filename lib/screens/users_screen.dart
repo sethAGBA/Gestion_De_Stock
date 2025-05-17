@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 import '../helpers/database_helper.dart';
 import '../models/models.dart';
 
@@ -10,13 +12,22 @@ class UsersScreen extends StatefulWidget {
 }
 
 class _UsersScreenState extends State<UsersScreen> {
-  String _selectedFilter = 'all'; // 'all', 'Administrateur', 'Employé'
+  String _selectedFilter = 'all';
   final _searchController = TextEditingController();
   String? _searchQuery;
 
   @override
   void initState() {
     super.initState();
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    if (!authProvider.isAdmin) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushReplacementNamed(context, '/dashboard');
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Accès réservé aux administrateurs')),
+        );
+      });
+    }
     _searchController.addListener(() {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) {
@@ -43,21 +54,25 @@ class _UsersScreenState extends State<UsersScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gestion des utilisateurs'),
+        backgroundColor: const Color(0xFF1C3144),
         actions: [
           IconButton(
-            icon: const Icon(Icons.login),
-            tooltip: 'Se connecter',
-            onPressed: () => _showLoginDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
+            icon: const Icon(Icons.add, color: Colors.white),
             tooltip: 'Ajouter un utilisateur',
             onPressed: () => _showAddUserDialog(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.logout, color: Colors.white),
+            tooltip: 'Déconnexion',
+            onPressed: () {
+              Provider.of<AuthProvider>(context, listen: false).logout();
+              Navigator.pushReplacementNamed(context, '/login');
+            },
           ),
         ],
       ),
       body: Padding(
-        padding: const EdgeInsets.only(bottom: 80), // Space for FAB
+        padding: const EdgeInsets.only(bottom: 80),
         child: Column(
           children: [
             _buildHeader(theme, isDarkMode),
@@ -67,16 +82,12 @@ class _UsersScreenState extends State<UsersScreen> {
         ),
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          debugPrint('FAB pressed');
-          _showAddUserDialog(context);
-        },
-        backgroundColor: theme.primaryColor,
+        onPressed: () => _showAddUserDialog(context),
+        backgroundColor: const Color(0xFF1C3144),
         elevation: 6,
         child: const Icon(Icons.add, color: Colors.white),
         tooltip: 'Ajouter un utilisateur',
       ),
-      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -84,7 +95,7 @@ class _UsersScreenState extends State<UsersScreen> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: theme.cardColor,
+        color: isDarkMode ? Colors.grey.shade800 : Colors.white,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -98,11 +109,7 @@ class _UsersScreenState extends State<UsersScreen> {
         children: [
           Row(
             children: [
-              Icon(
-                Icons.people,
-                color: theme.primaryColor,
-                size: 32,
-              ),
+              const Icon(Icons.people, color: Color(0xFF1C3144), size: 32),
               const SizedBox(width: 16),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -114,7 +121,10 @@ class _UsersScreenState extends State<UsersScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Gestion des profils et rôles',
-                    style: TextStyle(color: theme.textTheme.bodySmall?.color?.withOpacity(0.6), fontSize: 14),
+                    style: TextStyle(
+                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                      fontSize: 14,
+                    ),
                   ),
                 ],
               ),
@@ -128,7 +138,7 @@ class _UsersScreenState extends State<UsersScreen> {
               prefixIcon: const Icon(Icons.search),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
-              fillColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+              fillColor: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
             ),
           ),
         ],
@@ -164,9 +174,9 @@ class _UsersScreenState extends State<UsersScreen> {
           _selectedFilter = selected ? value : 'all';
         });
       },
-      backgroundColor: isSelected ? theme.primaryColor.withOpacity(0.1) : null,
-      selectedColor: theme.primaryColor.withOpacity(0.2),
-      checkmarkColor: theme.primaryColor,
+      backgroundColor: isSelected ? const Color(0xFF1C3144).withOpacity(0.1) : null,
+      selectedColor: const Color(0xFF1C3144).withOpacity(0.2),
+      checkmarkColor: const Color(0xFF1C3144),
     );
   }
 
@@ -220,7 +230,7 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Widget _buildUserCard(User user, bool isDarkMode) {
-    final roleColor = user.role == 'Administrateur' ? Colors.blue : Colors.green;
+    final roleColor = user.role == 'Administrateur' ? const Color(0xFF1C3144) : Colors.green;
     return Card(
       elevation: 0,
       color: isDarkMode ? Colors.grey.shade800 : roleColor.withOpacity(0.05),
@@ -252,18 +262,16 @@ class _UsersScreenState extends State<UsersScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Rôle: ${user.role}',
-                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                    ),
                   ),
                 ],
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.lock, color: Colors.purple),
-              onPressed: () => _showChangePasswordDialog(context, user),
-              tooltip: 'Changer le mot de passe',
-            ),
-            IconButton(
-              icon: const Icon(Icons.edit, color: Colors.blue),
+              icon: const Icon(Icons.edit, color: Color(0xFF1C3144)),
               onPressed: () => _showEditUserDialog(context, user),
               tooltip: 'Modifier',
             ),
@@ -299,206 +307,10 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
-  // New login dialog
-  Future<void> _showLoginDialog(BuildContext context) async {
-    debugPrint('Opening login dialog');
-    String? name;
-    String? password;
-    bool isValid = false;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Se connecter'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Nom',
-                    border: OutlineInputBorder(),
-                  ),
-                  onChanged: (value) {
-                    setDialogState(() {
-                      name = value.trim();
-                      isValid = _validateLoginForm(name, password);
-                    });
-                  },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Mot de passe',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      password = value.trim();
-                      isValid = _validateLoginForm(name, password);
-                    });
-                  },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un mot de passe' : null,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler'),
-            ),
-            ElevatedButton(
-              onPressed: isValid
-                  ? () async {
-                      try {
-                        final user = await DatabaseHelper.loginUser(name!, password!);
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          if (user != null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Connexion réussie : ${user.name}')),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Nom ou mot de passe incorrect')),
-                            );
-                          }
-                        }
-                      } catch (e) {
-                        debugPrint('Error during login: $e');
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur : $e')),
-                          );
-                        }
-                      }
-                    }
-                  : null,
-              child: const Text('Connexion'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // New change password dialog
-  Future<void> _showChangePasswordDialog(BuildContext context, User user) async {
-    debugPrint('Opening change password dialog');
-    String? currentPassword;
-    String? newPassword;
-    String? confirmPassword;
-    bool isValid = false;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Changer le mot de passe'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Mot de passe actuel',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      currentPassword = value.trim();
-                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
-                    });
-                  },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez le mot de passe actuel' : null,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Nouveau mot de passe',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      newPassword = value.trim();
-                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
-                    });
-                  },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nouveau mot de passe' : null,
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Confirmer le nouveau mot de passe',
-                    border: OutlineInputBorder(),
-                  ),
-                  obscureText: true,
-                  onChanged: (value) {
-                    setDialogState(() {
-                      confirmPassword = value.trim();
-                      isValid = _validatePasswordForm(currentPassword, newPassword, confirmPassword);
-                    });
-                  },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Confirmez le mot de passe' : null,
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler'),
-            ),
-            ElevatedButton(
-              onPressed: isValid
-                  ? () async {
-                      try {
-                        // Verify current password
-                        final currentUser = await DatabaseHelper.loginUser(user.name, currentPassword!);
-                        if (currentUser == null) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Mot de passe actuel incorrect')),
-                            );
-                          }
-                          return;
-                        }
-                        // Update password
-                        final updatedUser = User(
-                          id: user.id,
-                          name: user.name,
-                          role: user.role,
-                          password: newPassword!,
-                        );
-                        await DatabaseHelper.updateUser(updatedUser);
-                        if (context.mounted) {
-                          Navigator.pop(context);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Mot de passe modifié avec succès')),
-                          );
-                        }
-                      } catch (e) {
-                        debugPrint('Error changing password: $e');
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur : $e')),
-                          );
-                        }
-                      }
-                    }
-                  : null,
-              child: const Text('Changer'),
-            ),
-          ],
-        ),
-      ),
-    );
+  bool _validateForm(String? name, String? role, String? password, {bool isEdit = false}) {
+    return (name != null && name.trim().isNotEmpty) &&
+           (role != null && role.isNotEmpty) &&
+           (isEdit || (password != null && password.trim().isNotEmpty));
   }
 
   Future<void> _showAddUserDialog(BuildContext context) async {
@@ -526,7 +338,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       name = value.trim();
-                      isValid = _validateAddUserForm(name, role, password);
+                      isValid = _validateForm(name, role, password);
                     });
                   },
                   validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
@@ -546,7 +358,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       role = value;
-                      isValid = _validateAddUserForm(name, role, password);
+                      isValid = _validateForm(name, role, password);
                     });
                   },
                   validator: (value) => value == null ? 'Sélectionnez un rôle' : null,
@@ -561,7 +373,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       password = value.trim();
-                      isValid = _validateAddUserForm(name, role, password);
+                      isValid = _validateForm(name, role, password);
                     });
                   },
                   validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un mot de passe' : null,
@@ -578,31 +390,33 @@ class _UsersScreenState extends State<UsersScreen> {
               onPressed: isValid
                   ? () async {
                       try {
-                        final user = User(
-                          id: 0, // Auto-incremented by DB
+                        await DatabaseHelper.addUser(User(
+                          id: 0,
                           name: name!,
                           role: role!,
-                          password: password!, // Use provided password
-                        );
-                        await DatabaseHelper.addUser(user);
-                        if (context.mounted) {
+                          password: password!,
+                        ));
+                        if (mounted) {
                           Navigator.pop(context);
-                          setState(() {}); // Refresh list
+                          setState(() {});
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Utilisateur ajouté avec succès')),
                           );
                         }
                       } catch (e) {
                         debugPrint('Error adding user: $e');
-                        if (context.mounted) {
+                        if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur : $e')),
+                            SnackBar(content: Text('Erreur lors de l\'ajout : $e')),
                           );
                         }
                       }
                     }
                   : null,
-              child: const Text('Ajouter'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1C3144),
+              ),
+              child: const Text('Ajouter', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -611,9 +425,10 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Future<void> _showEditUserDialog(BuildContext context, User user) async {
-    debugPrint('Opening edit user dialog');
+    debugPrint('Opening edit user dialog for ${user.name}');
     String? name = user.name;
     String? role = user.role;
+    String? password = user.password;
     bool isValid = true;
     final roles = ['Administrateur', 'Employé'];
 
@@ -627,7 +442,7 @@ class _UsersScreenState extends State<UsersScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextFormField(
-                  initialValue: user.name,
+                  initialValue: name,
                   decoration: const InputDecoration(
                     labelText: 'Nom',
                     border: OutlineInputBorder(),
@@ -635,14 +450,14 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       name = value.trim();
-                      isValid = _validateForm(name, role);
+                      isValid = _validateForm(name, role, password, isEdit: true);
                     });
                   },
                   validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
-                  value: user.role,
+                  value: role,
                   decoration: const InputDecoration(
                     labelText: 'Rôle',
                     border: OutlineInputBorder(),
@@ -656,10 +471,24 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       role = value;
-                      isValid = _validateForm(name, role);
+                      isValid = _validateForm(name, role, password, isEdit: true);
                     });
                   },
                   validator: (value) => value == null ? 'Sélectionnez un rôle' : null,
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  decoration: const InputDecoration(
+                    labelText: 'Nouveau mot de passe (laisser vide pour ne pas changer)',
+                    border: OutlineInputBorder(),
+                  ),
+                  obscureText: true,
+                  onChanged: (value) {
+                    setDialogState(() {
+                      password = value.trim().isEmpty ? user.password : value.trim();
+                      isValid = _validateForm(name, role, password, isEdit: true);
+                    });
+                  },
                 ),
               ],
             ),
@@ -673,31 +502,33 @@ class _UsersScreenState extends State<UsersScreen> {
               onPressed: isValid
                   ? () async {
                       try {
-                        final updatedUser = User(
+                        await DatabaseHelper.updateUser(User(
                           id: user.id,
                           name: name!,
                           role: role!,
-                          password: user.password, // Preserve the existing password
-                        );
-                        await DatabaseHelper.updateUser(updatedUser);
-                        if (context.mounted) {
+                          password: password!,
+                        ));
+                        if (mounted) {
                           Navigator.pop(context);
-                          setState(() {}); // Refresh list
+                          setState(() {});
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Utilisateur modifié avec succès')),
                           );
                         }
                       } catch (e) {
                         debugPrint('Error updating user: $e');
-                        if (context.mounted) {
+                        if (mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur : $e')),
+                            SnackBar(content: Text('Erreur lors de la mise à jour : $e')),
                           );
                         }
                       }
                     }
                   : null,
-              child: const Text('Modifier'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1C3144),
+              ),
+              child: const Text('Modifier', style: TextStyle(color: Colors.white)),
             ),
           ],
         ),
@@ -706,68 +537,44 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Future<void> _confirmDeleteUser(BuildContext context, User user) async {
-    debugPrint('Opening delete user confirmation');
+    debugPrint('Confirming delete for user ${user.name}');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirmer la suppression'),
-        content: Text('Voulez-vous vraiment supprimer l\'utilisateur "${user.name}" ?'),
+        content: Text('Voulez-vous vraiment supprimer l\'utilisateur ${user.name} ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Annuler'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               try {
                 await DatabaseHelper.deleteUser(user.id);
-                if (context.mounted) {
+                if (mounted) {
                   Navigator.pop(context);
-                  setState(() {}); // Refresh list
+                  setState(() {});
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Utilisateur supprimé avec succès')),
                   );
                 }
               } catch (e) {
                 debugPrint('Error deleting user: $e');
-                if (context.mounted) {
+                if (mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erreur : $e')),
+                    SnackBar(content: Text('Erreur lors de la suppression : $e')),
                   );
                 }
               }
             },
-            child: const Text('Supprimer'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+            ),
+            child: const Text('Supprimer', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
-  }
-
-  bool _validateForm(String? name, String? role) {
-    return name != null && name.trim().isNotEmpty && role != null;
-  }
-
-  bool _validateLoginForm(String? name, String? password) {
-    return name != null && name.trim().isNotEmpty && password != null && password.trim().isNotEmpty;
-  }
-
-  bool _validatePasswordForm(String? currentPassword, String? newPassword, String? confirmPassword) {
-    return currentPassword != null &&
-        currentPassword.trim().isNotEmpty &&
-        newPassword != null &&
-        newPassword.trim().isNotEmpty &&
-        confirmPassword != null &&
-        confirmPassword.trim().isNotEmpty &&
-        newPassword == confirmPassword;
-  }
-
-  bool _validateAddUserForm(String? name, String? role, String? password) {
-    return name != null &&
-        name.trim().isNotEmpty &&
-        role != null &&
-        password != null &&
-        password.trim().isNotEmpty;
   }
 }

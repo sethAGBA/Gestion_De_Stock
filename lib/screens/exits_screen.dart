@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 import '../helpers/database_helper.dart';
 import '../models/models.dart';
 
@@ -440,7 +442,7 @@ class _ExitsScreenState extends State<ExitsScreen> {
                           type: selectedType!,
                           raison: raison.isEmpty ? null : raison,
                           date: DateTime.now(),
-                          utilisateur: 'Admin', // Replace with actual user
+                          utilisateur: Provider.of<AuthProvider>(context, listen: false).currentUser?.name ?? 'Inconnu', // Replace with actual user
                         );
                         await DatabaseHelper.addStockExit(exit);
                         Navigator.pop(context);

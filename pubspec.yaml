@@ -48,6 +48,7 @@ dependencies:
   url_launcher: ^6.3.1
   crypto: ^3.0.6
   provider: ^6.1.5
+  desktop_window: ^0.4.2
 
 dev_dependencies:
   flutter_test:

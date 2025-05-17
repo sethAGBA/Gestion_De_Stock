@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 import '../helpers/database_helper.dart';
 import '../models/models.dart';
 
@@ -230,7 +232,7 @@ class _EntriesScreenState extends State<EntriesScreen> {
     };
     final color = typeColors[entry.type] ?? Colors.grey;
     final icon = typeIcons[entry.type] ?? Icons.help;
-    final formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(entry.date);
+    final formattedDate = DateFormat('dd/MM/yyyy HH:mm').format(entry.dateTime);
 
     return Card(
       elevation: 0,
@@ -438,14 +440,14 @@ class _EntriesScreenState extends State<EntriesScreen> {
                   ? () async {
                       try {
                         final entry = StockEntry(
-                          produitId: selectedProduit!.id,
-                          produitNom: selectedProduit!.nom,
-                          quantite: quantite!,
-                          type: selectedType!,
-                          source: source.isEmpty ? null : source,
-                          date: DateTime.now(),
-                          utilisateur: 'Admin', // TODO: Replace with actual user
-                        );
+  produitId: selectedProduit!.id!,
+  produitNom: selectedProduit!.nom,
+  quantite: quantite!,
+  type: selectedType!,
+  source: source.isEmpty ? null : source,
+  date: DateTime.now().microsecondsSinceEpoch,  // Utilise un objet DateTime
+  utilisateur: Provider.of<AuthProvider>(context, listen: false).currentUser?.name ?? 'Inconnu',
+);
                         await DatabaseHelper.addStockEntry(entry);
                         if (context.mounted) {
                           Navigator.pop(context);

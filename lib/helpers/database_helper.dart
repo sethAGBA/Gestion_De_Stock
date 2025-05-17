@@ -1,33 +1,44 @@
+
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
 import '../models/models.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
+import '../constants/app_constants.dart';
 
 class DatabaseHelper {
   static Database? _database;
   static bool _isInitializing = false;
 
+  // Initialize database explicitly
+  static Future<void> initializeDatabase() async {
+    await database;
+  }
+
+  // Singleton-like database access
   static Future<Database> get database async {
     if (_database != null && await _database!.isOpen) {
+      print('Base de données déjà ouverte');
       return _database!;
     }
     if (_isInitializing) {
-      print('Waiting for database initialization...');
+      print('Initialisation de la base de données en cours, en attente...');
       while (_isInitializing) {
-        await Future.delayed(const Duration(milliseconds: 10));
+        await Future.delayed(const Duration(milliseconds: 50));
       }
-      if (_database != null && await _database!.isOpen) {
-        return _database!;
-      }
+      return _database!;
     }
+    print('Base de données fermée ou null, réinitialisation...');
     _isInitializing = true;
     try {
-      print('Initializing database...');
       _database = await _initDatabase();
-      print('Database initialized: $_database');
+      print('Base de données initialisée avec succès');
       return _database!;
+    } catch (e) {
+      print('Erreur lors de l\'initialisation de la base de données : $e');
+      rethrow;
     } finally {
       _isInitializing = false;
-      print('Initialization complete');
     }
   }
 
@@ -39,7 +50,13 @@ class DatabaseHelper {
       version: 14,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onConfigure: _onConfigure,
     );
+  }
+
+  static Future<void> _onConfigure(Database db) async {
+    await db.execute('PRAGMA foreign_keys = ON');
+    print('Clés étrangères activées');
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -235,12 +252,12 @@ class DatabaseHelper {
       category: 'Électronique',
       price: 50.00,
     ).toMap());
-    await db.insert('users', User(
-      id: 0,
-      name: 'Admin',
-      role: 'Administrateur',
-      password: 'admin123',
-    ).toMap());
+    final adminPassword = _hashPassword('admin123');
+    await db.insert('users', {
+      'name': 'Admin',
+      'role': AppConstants.ROLE_ADMIN,
+      'password': adminPassword,
+    });
     await db.insert('clients', Client(
       id: 0,
       nom: 'client X',
@@ -485,10 +502,10 @@ class DatabaseHelper {
     }
     if (oldVersion < 14) {
       print('Migration vers version 14 : ajout de password à users');
-      await db.execute('ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT "password"');
+      await db.execute('ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT "${_hashPassword("password")}"');
       await db.update(
         'users',
-        {'password': 'admin123'},
+        {'password': _hashPassword('admin123')},
         where: 'name = ?',
         whereArgs: ['Admin'],
       );
@@ -496,11 +513,37 @@ class DatabaseHelper {
     print('Mise à jour terminée.');
   }
 
-  static Future<void> closeDatabase() async {
-    if (_database != null && await _database!.isOpen) {
-      await _database!.close();
-      _database = null;
-      print('Database closed');
+  static String _hashPassword(String password) {
+    final hashed = sha256.convert(utf8.encode(password)).toString();
+    print('Hachage du mot de passe : **** -> $hashed');
+    return hashed;
+  }
+
+  static Future<void> resetAdminPassword() async {
+    final db = await database;
+    try {
+      print('Réinitialisation du mot de passe Admin...');
+      final adminPassword = _hashPassword('admin123');
+      final result = await db.update(
+        'users',
+        {'password': adminPassword},
+        where: 'name = ?',
+        whereArgs: ['Admin'],
+      );
+      if (result > 0) {
+        print('Mot de passe Admin réinitialisé avec succès');
+      } else {
+        print('Aucun utilisateur Admin trouvé, création...');
+        await db.insert('users', {
+          'name': 'Admin',
+          'role': AppConstants.ROLE_ADMIN,
+          'password': adminPassword,
+        });
+        print('Utilisateur Admin créé avec succès');
+      }
+    } catch (e) {
+      print('Erreur lors de la réinitialisation du mot de passe : $e');
+      throw e;
     }
   }
 
@@ -508,9 +551,9 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération des produits...');
-      final List<Map<String, dynamic>> maps = await db.query('produits');
+      final maps = await db.query('produits');
       print('Produits récupérés : ${maps.length}');
-      return List.generate(maps.length, (i) => Produit.fromMap(maps[i]));
+      return maps.map((map) => Produit.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des produits : $e');
       return [];
@@ -521,9 +564,9 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération des fournisseurs...');
-      final List<Map<String, dynamic>> maps = await db.query('suppliers');
+      final maps = await db.query('suppliers');
       print('Fournisseurs récupérés : ${maps.length}');
-      return List.generate(maps.length, (i) => Supplier.fromMap(maps[i]));
+      return maps.map((map) => Supplier.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des fournisseurs : $e');
       return [];
@@ -534,9 +577,9 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération des utilisateurs...');
-      final List<Map<String, dynamic>> maps = await db.query('users');
+      final maps = await db.query('users');
       print('Utilisateurs récupérés : ${maps.length}');
-      return List.generate(maps.length, (i) => User.fromMap(maps[i]));
+      return maps.map((map) => User.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des utilisateurs : $e');
       return [];
@@ -547,8 +590,18 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Ajout de l\'utilisateur : ${user.name}...');
-      await db.insert('users', user.toMap());
-      print('Utilisateur ajouté avec succès');
+      if (!AppConstants.isValidRole(user.role)) {
+        throw Exception('Rôle utilisateur non valide : ${user.role}');
+      }
+      final hashedUser = User(
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        password: _hashPassword(user.password),
+      );
+      await db.insert('users', hashedUser.toMap());
+      print('Utilisateur ajouté avec succès avec le rôle : ${user.role}');
+      await debugUsers();
     } catch (e) {
       print('Erreur lors de l\'ajout de l\'utilisateur : $e');
       throw e;
@@ -559,13 +612,24 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Mise à jour de l\'utilisateur : ${user.name}...');
-      await db.update(
+      if (!AppConstants.isValidRole(user.role)) {
+        throw Exception('Rôle utilisateur non valide : ${user.role}');
+      }
+      final hashedUser = User(
+        id: user.id,
+        name: user.name,
+        role: user.role,
+        password: user.password.startsWith('\$') ? user.password : _hashPassword(user.password),
+      );
+      final result = await db.update(
         'users',
-        user.toMap(),
+        hashedUser.toMap(),
         where: 'id = ?',
         whereArgs: [user.id],
       );
+      if (result == 0) throw Exception('Utilisateur non trouvé');
       print('Utilisateur mis à jour avec succès');
+      await debugUsers();
     } catch (e) {
       print('Erreur lors de la mise à jour de l\'utilisateur : $e');
       throw e;
@@ -576,12 +640,14 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Suppression de l\'utilisateur avec id : $id...');
-      await db.delete(
+      final result = await db.delete(
         'users',
         where: 'id = ?',
         whereArgs: [id],
       );
+      if (result == 0) throw Exception('Utilisateur non trouvé');
       print('Utilisateur supprimé avec succès');
+      await debugUsers();
     } catch (e) {
       print('Erreur lors de la suppression de l\'utilisateur : $e');
       throw e;
@@ -592,10 +658,11 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Tentative de connexion pour l\'utilisateur : $name...');
-      final List<Map<String, dynamic>> maps = await db.query(
+      final hashedPassword = _hashPassword(password);
+      final maps = await db.query(
         'users',
         where: 'name = ? AND password = ?',
-        whereArgs: [name, password],
+        whereArgs: [name, hashedPassword],
       );
       if (maps.isEmpty) {
         print('Échec de la connexion : utilisateur ou mot de passe incorrect');
@@ -605,7 +672,7 @@ class DatabaseHelper {
       return User.fromMap(maps.first);
     } catch (e) {
       print('Erreur lors de la connexion : $e');
-      return null;
+      throw e;
     }
   }
 
@@ -613,9 +680,9 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération des clients...');
-      final List<Map<String, dynamic>> maps = await db.query('clients');
+      final maps = await db.query('clients');
       print('Clients récupérés : ${maps.length}');
-      return List.generate(maps.length, (i) => Client.fromMap(maps[i]));
+      return maps.map((map) => Client.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des clients : $e');
       return [];
@@ -626,13 +693,13 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération des factures...');
-      final List<Map<String, dynamic>> maps = await db.query(
+      final maps = await db.query(
         'factures',
         where: includeArchived ? null : 'statut = ?',
         whereArgs: includeArchived ? null : ['Active'],
       );
       print('Factures récupérées : ${maps.length}');
-      return List.generate(maps.length, (i) => Facture.fromMap(maps[i]));
+      return maps.map((map) => Facture.fromMap(map)).toList();
     } catch (e) {
       print('Erreur lors de la récupération des factures : $e');
       return [];
@@ -643,7 +710,7 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Récupération de la facture archivée pour factureId $factureId...');
-      final List<Map<String, dynamic>> maps = await db.query(
+      final maps = await db.query(
         'factures_archivees',
         where: 'facture_id = ?',
         whereArgs: [factureId],
@@ -678,13 +745,14 @@ class DatabaseHelper {
         where: 'factureId = ?',
         whereArgs: [factureId],
       );
-      final totalPaye = paiements.fold(0.0, (sum, p) => sum + (p['montant'] as num));
+      final totalPaye = paiements.fold<double>(0.0, (sum, p) => sum + (p['montant'] as num));
 
       final facture = await db.query(
         'factures',
         where: 'id = ?',
         whereArgs: [factureId],
       );
+      if (facture.isEmpty) throw Exception('Facture non trouvée');
       final total = (facture.first['total'] as num).toDouble();
       final statutPaiement = totalPaye >= total ? 'Payé' : 'En attente';
 
@@ -699,7 +767,6 @@ class DatabaseHelper {
         where: 'id = ?',
         whereArgs: [factureId],
       );
-
       print('Paiement ajouté et montantPaye mis à jour : $totalPaye, statut: $statutPaiement');
     } catch (e) {
       print('Erreur lors de l\'ajout du paiement : $e');
@@ -741,7 +808,6 @@ class DatabaseHelper {
         if (factureData['statut'] == 'Annulée') throw Exception('Facture déjà annulée');
 
         final bonCommandeId = factureData['bonCommandeId'] as int;
-
         final items = await txn.query(
           'bon_commande_items',
           where: 'bonCommandeId = ?',
@@ -824,12 +890,13 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Mise à jour du produit : ${produit.nom}...');
-      await db.update(
+      final result = await db.update(
         'produits',
         produit.toMap(),
         where: 'id = ?',
         whereArgs: [produit.id],
       );
+      if (result == 0) throw Exception('Produit non trouvé');
       print('Produit mis à jour avec succès');
     } catch (e) {
       print('Erreur lors de la mise à jour du produit : $e');
@@ -905,20 +972,17 @@ class DatabaseHelper {
         where: 'id = ?',
         whereArgs: [produitId],
       );
-      if (produit.isNotEmpty) {
-        final currentStock = (produit.first['quantiteStock'] as num).toInt();
-        final newStock = currentStock - quantite;
-        if (newStock < 0) {
-          throw Exception('Stock insuffisant');
-        }
-        await db.update(
-          'produits',
-          {'quantiteStock': newStock},
-          where: 'id = ?',
-          whereArgs: [produitId],
-        );
-        print('Stock mis à jour : $newStock');
-      }
+      if (produit.isEmpty) throw Exception('Produit non trouvé');
+      final currentStock = (produit.first['quantiteStock'] as num).toInt();
+      final newStock = currentStock - quantite;
+      if (newStock < 0) throw Exception('Stock insuffisant');
+      await db.update(
+        'produits',
+        {'quantiteStock': newStock},
+        where: 'id = ?',
+        whereArgs: [produitId],
+      );
+      print('Stock mis à jour : $newStock');
     } catch (e) {
       print('Erreur lors de la mise à jour du stock : $e');
       throw e;
@@ -986,6 +1050,7 @@ class DatabaseHelper {
         'stock_exits',
         where: typeFilter != null ? 'type = ?' : null,
         whereArgs: typeFilter != null ? [typeFilter] : null,
+        orderBy: 'date DESC',
       );
       print('Sorties de stock récupérées : ${maps.length}');
       return maps.map((map) => StockExit.fromMap(map)).toList();
@@ -1066,7 +1131,7 @@ class DatabaseHelper {
           'produits',
           {
             'quantiteStock': currentStock + entry.quantite,
-            'derniereEntree': entry.date.millisecondsSinceEpoch,
+            'derniereEntree': entry.date,
           },
           where: 'id = ?',
           whereArgs: [entry.produitId],
@@ -1095,6 +1160,72 @@ class DatabaseHelper {
     } catch (e) {
       print('Erreur lors de la récupération des entrées de stock : $e');
       return [];
+    }
+  }
+
+  static Future<List<Produit>> getLowStockProducts() async {
+    final db = await database;
+    try {
+      print('Récupération des produits à faible stock...');
+      final maps = await db.query(
+        'produits',
+        where: 'quantiteStock <= seuilAlerte',
+      );
+      print('Produits à faible stock récupérés : ${maps.length}');
+      return maps.map((map) => Produit.fromMap(map)).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits à faible stock : $e');
+      return [];
+    }
+  }
+
+  static Future<void> debugUsers() async {
+    final db = await database;
+    try {
+      print('Débogage des utilisateurs...');
+      final users = await db.query('users');
+      for (var user in users) {
+        print('User: ${user['name']}, Password: ${user['password'].toString().substring(0, 8)}..., Role: ${user['role']}');
+      }
+      print('Total utilisateurs : ${users.length}');
+    } catch (e) {
+      print('Erreur lors du débogage des utilisateurs : $e');
+    }
+  }
+
+  static Future<void> debugDatabaseState() async {
+    final db = await database;
+    try {
+      print('Débogage de l\'état de la base de données...');
+      final tables = await db.rawQuery("SELECT name FROM sqlite_master WHERE type='table'");
+      print('Tables: ${tables.map((t) => t['name']).join(', ')}');
+      for (var table in tables) {
+        final count = await db.rawQuery('SELECT COUNT(*) as count FROM ${table['name']}');
+        print('Table ${table['name']}: ${count.first['count']} rows');
+      }
+    } catch (e) {
+      print('Erreur lors du débogage de l\'état de la base de données : $e');
+    }
+  }
+
+  static Future<void> addTestUser(String name, String password, String role) async {
+    final db = await database;
+    try {
+      print('Ajout de l\'utilisateur test : $name avec le rôle : $role');
+      if (!AppConstants.isValidRole(role)) {
+        throw Exception('Rôle utilisateur non valide : $role');
+      }
+      final hashedPassword = _hashPassword(password);
+      await db.insert('users', {
+        'name': name,
+        'role': role,
+        'password': hashedPassword,
+      });
+      print('Utilisateur test ajouté avec succès');
+      await debugUsers();
+    } catch (e) {
+      print('Erreur lors de l\'ajout de l\'utilisateur test : $e');
+      throw e;
     }
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import '../helpers/database_helper.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/providers/ProductsProvider.dart';
+import 'package:stock_management/providers/auth_provider.dart';
 import '../models/models.dart';
 
 class ProductsScreen extends StatefulWidget {
@@ -41,17 +43,15 @@ class _ProductsScreenState extends State<ProductsScreen> {
   DateTime? _derniereSortie;
   String _statut = 'disponible';
 
-  late Future<List<Produit>> _produitsFuture;
   List<Produit> _filteredProduits = [];
 
   @override
   void initState() {
     super.initState();
-    _produitsFuture = Future.value([]);
-    setState(() {
-      _produitsFuture = DatabaseHelper.getProduits();
-    });
     _searchController.addListener(_filterProducts);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<ProductsProvider>(context, listen: false).initDatabase();
+    });
   }
 
   @override
@@ -62,7 +62,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
   }
 
   Future<bool> _checkProductExists(String nom, {int? excludeId}) async {
-    final produits = await DatabaseHelper.getProduits();
+    final provider = Provider.of<ProductsProvider>(context, listen: false);
+    final produits = provider.produits;
     return produits.any((p) => p.nom == nom && (excludeId == null || p.id != excludeId));
   }
 
@@ -116,34 +117,24 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
       try {
         print('Tentative d\'insertion du produit : $_nom');
-        await DatabaseHelper.addProduit(produit);
+        await Provider.of<ProductsProvider>(context, listen: false).addProduct(produit);
         print('Produit inséré avec succès : $_nom');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produit ajouté avec succès')),
-          );
-          Navigator.pop(context);
-          setState(() {
-            _produitsFuture = DatabaseHelper.getProduits();
-          });
-        }
+        Navigator.pop(context);
       } catch (e) {
         print('Erreur lors de l\'insertion du produit : $e');
-        if (mounted) {
-          await showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Erreur'),
-              content: Text('Erreur lors de l\'insertion : $e'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        }
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Erreur'),
+            content: Text('Erreur lors de l\'insertion : $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
       }
     } else {
       print('Échec de la validation du formulaire.');
@@ -200,60 +191,27 @@ class _ProductsScreenState extends State<ProductsScreen> {
       );
       try {
         print('Tentative de mise à jour du produit : $_nom');
-        await DatabaseHelper.updateProduit(produit);
+        await Provider.of<ProductsProvider>(context, listen: false).updateProduct(produit);
         print('Produit mis à jour avec succès : $_nom');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produit mis à jour avec succès')),
-          );
-          Navigator.pop(context);
-          setState(() {
-            _produitsFuture = DatabaseHelper.getProduits();
-          });
-        }
+        Navigator.pop(context);
       } catch (e) {
         print('Erreur lors de la mise à jour du produit : $e');
-        if (mounted) {
-          await showDialog(
-            context: context,
-            builder: (context) => AlertDialog(
-              title: const Text('Erreur'),
-              content: Text('Erreur lors de la mise à jour : $e'),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          );
-        }
+        await showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Erreur'),
+            content: Text('Erreur lors de la mise à jour : $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
       }
     } else {
       print('Échec de la validation du formulaire.');
-    }
-  }
-
-  Future<void> _logDamagedAction(int produitId, String produitNom, int quantite, String action, String utilisateur) async {
-    try {
-      final log = DamagedAction(
-        id: 0,
-        produitId: produitId,
-        produitNom: produitNom,
-        quantite: quantite,
-        action: action,
-        utilisateur: utilisateur,
-        date: DateTime.now().millisecondsSinceEpoch,
-      );
-      await DatabaseHelper.addDamagedAction(log);
-      print('Action enregistrée dans historique_avaries : $action pour produit $produitId');
-    } catch (e) {
-      print('Erreur lors de l\'enregistrement dans historique_avaries : $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur lors de l\'enregistrement : $e')),
-        );
-      }
     }
   }
 
@@ -310,49 +268,18 @@ class _ProductsScreenState extends State<ProductsScreen> {
               if (formKey.currentState!.validate()) {
                 formKey.currentState!.save();
                 try {
-                  final updatedProduit = Produit(
-                    id: produit.id,
-                    nom: produit.nom,
-                    description: produit.description,
-                    categorie: produit.categorie,
-                    marque: produit.marque,
-                    imageUrl: produit.imageUrl,
-                    sku: produit.sku,
-                    codeBarres: produit.codeBarres,
-                    unite: produit.unite,
-                    quantiteStock: produit.quantiteStock - quantiteADeclarer,
-                    quantiteAvariee: produit.quantiteAvariee + quantiteADeclarer,
-                    stockMin: produit.stockMin,
-                    stockMax: produit.stockMax,
-                    seuilAlerte: produit.seuilAlerte,
-                    variantes: produit.variantes,
-                    prixAchat: produit.prixAchat,
-                    prixVente: produit.prixVente,
-                    tva: produit.tva,
-                    fournisseurPrincipal: produit.fournisseurPrincipal,
-                    fournisseursSecondaires: produit.fournisseursSecondaires,
-                    derniereEntree: produit.derniereEntree,
-                    derniereSortie: produit.derniereSortie,
-                    statut: produit.statut,
+                  await Provider.of<ProductsProvider>(context, listen: false).declareDamaged(
+                    produit.id,
+                    produit.nom,
+                    quantiteADeclarer,
+                    Provider.of<AuthProvider>(context, listen: false).currentUser?.name ?? 'Inconnu',
                   );
-                  await DatabaseHelper.updateProduit(updatedProduit);
-                  await _logDamagedAction(produit.id, produit.nom, quantiteADeclarer, 'declare', 'Admin');
-                  if (mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Produits avariés déclarés')),
-                    );
-                    setState(() {
-                      _produitsFuture = DatabaseHelper.getProduits();
-                    });
-                  }
+                  Navigator.pop(context);
                 } catch (e) {
                   print('Erreur lors de la déclaration d\'avarie : $e');
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Erreur lors de la déclaration : $e')),
-                    );
-                  }
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Erreur lors de la déclaration : $e')),
+                  );
                 }
               }
             },
@@ -365,100 +292,34 @@ class _ProductsScreenState extends State<ProductsScreen> {
 
   Future<void> _handleDamagedAction(Produit produit, String action) async {
     try {
-      if (action == 'retour') {
-        final updatedProduit = Produit(
-          id: produit.id,
-          nom: produit.nom,
-          description: produit.description,
-          categorie: produit.categorie,
-          marque: produit.marque,
-          imageUrl: produit.imageUrl,
-          sku: produit.sku,
-          codeBarres: produit.codeBarres,
-          unite: produit.unite,
-          quantiteStock: produit.quantiteStock + produit.quantiteAvariee,
-          quantiteAvariee: 0,
-          stockMin: produit.stockMin,
-          stockMax: produit.stockMax,
-          seuilAlerte: produit.seuilAlerte,
-          variantes: produit.variantes,
-          prixAchat: produit.prixAchat,
-          prixVente: produit.prixVente,
-          tva: produit.tva,
-          fournisseurPrincipal: produit.fournisseurPrincipal,
-          fournisseursSecondaires: produit.fournisseursSecondaires,
-          derniereEntree: produit.derniereEntree,
-          derniereSortie: produit.derniereSortie,
-          statut: produit.statut,
-        );
-        await DatabaseHelper.updateProduit(updatedProduit);
-        await _logDamagedAction(produit.id, produit.nom, produit.quantiteAvariee, 'retour', 'Admin');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produits avariés retournés au fournisseur')),
-          );
-        }
-      } else if (action == 'detruit') {
-        final updatedProduit = Produit(
-          id: produit.id,
-          nom: produit.nom,
-          description: produit.description,
-          categorie: produit.categorie,
-          marque: produit.marque,
-          imageUrl: produit.imageUrl,
-          sku: produit.sku,
-          codeBarres: produit.codeBarres,
-          unite: produit.unite,
-          quantiteStock: produit.quantiteStock,
-          quantiteAvariee: 0,
-          stockMin: produit.stockMin,
-          stockMax: produit.stockMax,
-          seuilAlerte: produit.seuilAlerte,
-          variantes: produit.variantes,
-          prixAchat: produit.prixAchat,
-          prixVente: produit.prixVente,
-          tva: produit.tva,
-          fournisseurPrincipal: produit.fournisseurPrincipal,
-          fournisseursSecondaires: produit.fournisseursSecondaires,
-          derniereEntree: produit.derniereEntree,
-          derniereSortie: produit.derniereSortie,
-          statut: produit.statut,
-        );
-        await DatabaseHelper.updateProduit(updatedProduit);
-        await _logDamagedAction(produit.id, produit.nom, produit.quantiteAvariee, 'detruit', 'Admin');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Produits avariés marqués comme détruits')),
-          );
-        }
-      }
-      if (mounted) {
-        setState(() {
-          _produitsFuture = DatabaseHelper.getProduits();
-        });
-      }
+      await Provider.of<ProductsProvider>(context, listen: false).handleDamagedAction(
+        produit.id,
+        produit.nom,
+        action,
+        Provider.of<AuthProvider>(context, listen: false).currentUser?.name ?? 'Inconnu',
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(action == 'retour' ? 'Produits avariés retournés au fournisseur' : 'Produits avariés marqués comme détruits')),
+      );
     } catch (e) {
       print('Erreur lors de l\'action sur les avaries : $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur lors de l\'action : $e')),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur lors de l\'action : $e')),
+      );
     }
   }
 
   void _filterProducts() {
+    final provider = Provider.of<ProductsProvider>(context, listen: false);
     setState(() {
-      _produitsFuture.then((produits) {
-        final query = _searchController.text.trim().toLowerCase();
-        _filteredProduits = produits.where((produit) {
-          return (produit.nom.toLowerCase().contains(query)) ||
-              (produit.categorie.toLowerCase().contains(query)) ||
-              (produit.fournisseurPrincipal?.toLowerCase().contains(query) ?? false) ||
-              (produit.statut.toLowerCase().contains(query)) ||
-              (query.contains('avarié') && produit.quantiteAvariee > 0);
-        }).toList();
-      });
+      final query = _searchController.text.trim().toLowerCase();
+      _filteredProduits = provider.produits.where((produit) {
+        return (produit.nom.toLowerCase().contains(query)) ||
+            (produit.categorie.toLowerCase().contains(query)) ||
+            (produit.fournisseurPrincipal?.toLowerCase().contains(query) ?? false) ||
+            (produit.statut.toLowerCase().contains(query)) ||
+            (query.contains('avarié') && produit.quantiteAvariee > 0);
+      }).toList();
     });
   }
 
@@ -789,296 +650,273 @@ class _ProductsScreenState extends State<ProductsScreen> {
     final theme = Theme.of(context);
     final isDarkMode = theme.brightness == Brightness.dark;
 
-    return Scaffold(
-      backgroundColor: isDarkMode ? Colors.grey.shade900 : Colors.white,
-      body: Padding(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Consumer<ProductsProvider>(
+      builder: (context, provider, child) {
+        if (provider.isLoading) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (provider.errorMessage != null) {
+          return Scaffold(
+            body: Center(child: Text('Erreur : ${provider.errorMessage}')),
+          );
+        }
+        final produits = _filteredProduits.isNotEmpty || _searchController.text.isNotEmpty
+            ? _filteredProduits
+            : provider.produits;
+
+        return Scaffold(
+          backgroundColor: isDarkMode ? Colors.grey.shade900 : Colors.white,
+          body: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Produits',
-                  style: TextStyle(
-                    fontSize: 28,
-                    fontWeight: FontWeight.bold,
-                    color: isDarkMode ? Colors.white : const Color(0xFF0A3049),
-                  ),
-                ),
-                ElevatedButton(
-                  onPressed: () => _showProductDialog(),
-                  style: ElevatedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    backgroundColor: const Color(0xFF0E5A8A),
-                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  child: const Text('Créer un produit'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12.0),
-                    child: Icon(Icons.search, color: isDarkMode ? Colors.grey.shade400 : Colors.grey),
-                  ),
-                  Expanded(
-                    child: TextField(
-                      controller: _searchController,
-                      decoration: InputDecoration(
-                        hintText: 'Rechercher un produit (inclut "avarié")',
-                        border: InputBorder.none,
-                        hintStyle: TextStyle(color: isDarkMode ? Colors.grey.shade600 : Colors.grey.shade400),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Produits',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : const Color(0xFF0A3049),
                       ),
                     ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-              decoration: BoxDecoration(
-                color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    const SizedBox(width: 120, child: Text('Nom', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Catégorie', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Stock', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Avarié', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Prix vente', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Fournisseur', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 80, child: Text('Statut', style: TextStyle(fontWeight: FontWeight.bold))),
-                    const SizedBox(width: 120, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                    ElevatedButton(
+                      onPressed: () => _showProductDialog(),
+                      style: ElevatedButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: const Color(0xFF0E5A8A),
+                        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      child: const Text('Créer un produit'),
+                    ),
                   ],
                 ),
-              ),
-            ),
-            Expanded(
-              child: CustomScrollView(
-                scrollDirection: Axis.vertical,
-                slivers: [
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    sliver: FutureBuilder<List<Produit>>(
-                      future: _produitsFuture,
-                      builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const SliverFillRemaining(
-                            child: Center(child: CircularProgressIndicator()),
-                          );
-                        }
-                        if (snapshot.hasError) {
-                          print('Erreur dans FutureBuilder : ${snapshot.error}');
-                          return SliverFillRemaining(
-                            child: Center(child: Text('Erreur : ${snapshot.error}')),
-                          );
-                        }
-                        if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                          return SliverFillRemaining(
-                            child: Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    CupertinoIcons.exclamationmark_triangle,
-                                    size: 48,
-                                    color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                const SizedBox(height: 24),
+                Container(
+                  decoration: BoxDecoration(
+                    border: Border.all(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 12.0),
+                        child: Icon(Icons.search, color: isDarkMode ? Colors.grey.shade400 : Colors.grey),
+                      ),
+                      Expanded(
+                        child: TextField(
+                          controller: _searchController,
+                          decoration: InputDecoration(
+                            hintText: 'Rechercher un produit (inclut "avarié")',
+                            border: InputBorder.none,
+                            hintStyle: TextStyle(color: isDarkMode ? Colors.grey.shade600 : Colors.grey.shade400),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                  decoration: BoxDecoration(
+                    color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 120, child: Text('Nom', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Catégorie', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Stock', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Avarié', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Prix vente', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Fournisseur', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 80, child: Text('Statut', style: TextStyle(fontWeight: FontWeight.bold))),
+                        const SizedBox(width: 120, child: Text('Actions', style: TextStyle(fontWeight: FontWeight.bold))),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: CustomScrollView(
+                    scrollDirection: Axis.vertical,
+                    slivers: [
+                      SliverPadding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        sliver: produits.isEmpty
+                            ? SliverFillRemaining(
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        _searchController.text.isNotEmpty
+                                            ? CupertinoIcons.search
+                                            : CupertinoIcons.exclamationmark_triangle,
+                                        size: 48,
+                                        color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        _searchController.text.isNotEmpty
+                                            ? 'Aucun produit trouvé pour cette recherche'
+                                            : 'Aucun produit disponible',
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                                        ),
+                                      ),
+                                    ],
                                   ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Aucun produit disponible',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                        final produits = _filteredProduits.isNotEmpty || _searchController.text.isNotEmpty
-                            ? _filteredProduits
-                            : snapshot.data!;
-                        if (produits.isEmpty && _searchController.text.isNotEmpty) {
-                          return SliverFillRemaining(
-                            child: Center(
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Icon(
-                                    CupertinoIcons.search,
-                                    size: 48,
-                                    color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                                  ),
-                                  const SizedBox(height: 16),
-                                  Text(
-                                    'Aucun produit trouvé pour cette recherche',
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          );
-                        }
-                        print('Affichage des produits : ${produits.map((p) => p.nom).toList()}');
-                        return SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final produit = produits[index];
-                              final isLowStock = produit.quantiteStock <= produit.seuilAlerte;
-                              final hasDamaged = produit.quantiteAvariee > 0;
-                              return Container(
-                                decoration: BoxDecoration(
-                                  color: hasDamaged ? Colors.red.withOpacity(0.05) : null,
-                                  border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200)),
                                 ),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.nom,
-                                            _searchController.text,
-                                            const TextStyle(fontWeight: FontWeight.w500),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.categorie,
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
-                                            style: TextStyle(
-                                              color: isLowStock ? Colors.red : null,
-                                              fontWeight: isLowStock ? FontWeight.bold : null,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
-                                            style: TextStyle(
-                                              color: hasDamaged ? Colors.red : null,
-                                              fontWeight: hasDamaged ? FontWeight.bold : null,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            produit.prixVente.toStringAsFixed(2),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.fournisseurPrincipal ?? 'N/A',
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 80,
-                                          child: _highlightText(
-                                            produit.statut,
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
+                              )
+                            : SliverList(
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) {
+                                    final produit = produits[index];
+                                    final isLowStock = produit.quantiteStock <= produit.seuilAlerte;
+                                    final hasDamaged = produit.quantiteAvariee > 0;
+                                    return Container(
+                                      decoration: BoxDecoration(
+                                        color: hasDamaged ? Colors.red.withOpacity(0.05) : null,
+                                        border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200)),
+                                      ),
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
                                           child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            crossAxisAlignment: CrossAxisAlignment.center,
                                             children: [
-                                              IconButton(
-                                                icon: const Icon(CupertinoIcons.pen, color: Color(0xFF0E5A8A), size: 20),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () => _showProductDialog(isEditing: true, produit: produit),
+                                              SizedBox(
+                                                width: 120,
+                                                child: _highlightText(
+                                                  produit.nom,
+                                                  _searchController.text,
+                                                  const TextStyle(fontWeight: FontWeight.w500),
+                                                  isDarkMode,
+                                                ),
                                               ),
-                                              const SizedBox(width: 10),
-                                              IconButton(
-                                                icon: const Icon(CupertinoIcons.exclamationmark_triangle, color: Colors.orange, size: 20),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () => _declareDamaged(produit),
+                                              SizedBox(
+                                                width: 120,
+                                                child: _highlightText(
+                                                  produit.categorie,
+                                                  _searchController.text,
+                                                  const TextStyle(),
+                                                  isDarkMode,
+                                                ),
                                               ),
-                                              const SizedBox(width: 10),
-                                              PopupMenuButton<String>(
-                                                icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
-                                                onSelected: (value) => _handleDamagedAction(produit, value),
-                                                itemBuilder: (context) => [
-                                                  if (produit.quantiteAvariee > 0)
-                                                    const PopupMenuItem(
-                                                      value: 'retour',
-                                                      child: Text('Retour au fournisseur'),
+                                              SizedBox(
+                                                width: 120,
+                                                child: Text(
+                                                  '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
+                                                  style: TextStyle(
+                                                    color: isLowStock ? Colors.red : null,
+                                                    fontWeight: isLowStock ? FontWeight.bold : null,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              SizedBox(
+                                                width: 120,
+                                                child: Text(
+                                                  '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
+                                                  style: TextStyle(
+                                                    color: hasDamaged ? Colors.red : null,
+                                                    fontWeight: hasDamaged ? FontWeight.bold : null,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              SizedBox(
+                                                width: 120,
+                                                child: Text(
+                                                  produit.prixVente.toStringAsFixed(2),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                              SizedBox(
+                                                width: 120,
+                                                child: _highlightText(
+                                                  produit.fournisseurPrincipal ?? 'N/A',
+                                                  _searchController.text,
+                                                  const TextStyle(),
+                                                  isDarkMode,
+                                                ),
+                                              ),
+                                              SizedBox(
+                                                width: 80,
+                                                child: _highlightText(
+                                                  produit.statut,
+                                                  _searchController.text,
+                                                  const TextStyle(),
+                                                  isDarkMode,
+                                                ),
+                                              ),
+                                              SizedBox(
+                                                width: 120,
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  mainAxisAlignment: MainAxisAlignment.center,
+                                                  children: [
+                                                    IconButton(
+                                                      icon: const Icon(CupertinoIcons.pen, color: Color(0xFF0E5A8A), size: 20),
+                                                      padding: EdgeInsets.zero,
+                                                      constraints: const BoxConstraints(),
+                                                      onPressed: () => _showProductDialog(isEditing: true, produit: produit),
                                                     ),
-                                                  if (produit.quantiteAvariee > 0)
-                                                    const PopupMenuItem(
-                                                      value: 'detruit',
-                                                      child: Text('Marquer comme détruit'),
+                                                    const SizedBox(width: 10),
+                                                    IconButton(
+                                                      icon: const Icon(CupertinoIcons.exclamationmark_triangle, color: Colors.orange, size: 20),
+                                                      padding: EdgeInsets.zero,
+                                                      constraints: const BoxConstraints(),
+                                                      onPressed: () => _declareDamaged(produit),
                                                     ),
-                                                ],
+                                                    const SizedBox(width: 10),
+                                                    PopupMenuButton<String>(
+                                                      icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
+                                                      onSelected: (value) => _handleDamagedAction(produit, value),
+                                                      itemBuilder: (context) => [
+                                                        if (produit.quantiteAvariee > 0)
+                                                          const PopupMenuItem(
+                                                            value: 'retour',
+                                                            child: Text('Retour au fournisseur'),
+                                                          ),
+                                                        if (produit.quantiteAvariee > 0)
+                                                          const PopupMenuItem(
+                                                            value: 'detruit',
+                                                            child: Text('Marquer comme détruit'),
+                                                          ),
+                                                      ],
+                                                    ),
+                                                  ],
+                                                ),
                                               ),
                                             ],
                                           ),
                                         ),
-                                      ],
-                                    ),
-                                  ),
+                                      ),
+                                    );
+                                  },
+                                  childCount: produits.length,
                                 ),
-                              );
-                            },
-                            childCount: produits.length,
-                          ),
-                        );
-                      },
-                    ),
+                              ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }

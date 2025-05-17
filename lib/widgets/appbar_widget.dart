@@ -1,4 +1,7 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../providers/dashboard_provider.dart';
 
 class AppBarWidget extends StatelessWidget {
   final bool isSmallScreen;
@@ -65,14 +68,21 @@ class AppBarWidget extends StatelessWidget {
           ),
           const SizedBox(width: 16.0),
           IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Actualiser',
+            onPressed: () {
+              Provider.of<DashboardProvider>(context, listen: false).fetchDashboardData();
+            },
+          ),
+          IconButton(
             icon: const Icon(Icons.notifications),
             onPressed: () {},
           ),
           if (!isSmallScreen) const SizedBox(width: 16.0),
           if (!isSmallScreen)
             IconButton(
-              icon: const Icon(Icons.logout),
-              tooltip: 'Déconnexion',
+              icon: const Icon(CupertinoIcons.person_alt),
+              tooltip: 'Profil',
               onPressed: onLogout,
             ),
         ],

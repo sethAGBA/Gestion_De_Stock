@@ -1,125 +1,81 @@
-// import 'package:flutter/material.dart';
-// import 'package:window_manager/window_manager.dart';
-
-// import 'screens/dashboard_screen.dart';
-
-// void main() async {
-//   WidgetsFlutterBinding.ensureInitialized();
-
-//   await windowManager.ensureInitialized();
-
-//   // Obtenir la taille de l'écran principal
-//   final screen = await windowManager.getBounds();
-//   final screenSize = screen.size;
-
-//   // Définir une taille par défaut relative (80% de l'écran)
-//   final double defaultWidth = screenSize.width * 0.8;
-//   final double defaultHeight = screenSize.height * 0.8;
-
-//   WindowOptions windowOptions = WindowOptions(
-//     size: Size(defaultWidth, defaultHeight),
-//     minimumSize: const Size(1000, 700), // Taille minimale imposée
-//     center: true,
-//     title: "Gestion de Stock",
-//     backgroundColor: Colors.white,
-//   );
-
-//   windowManager.waitUntilReadyToShow(windowOptions, () async {
-//     await windowManager.show();
-//     await windowManager.focus();
-//   });
-
-//   runApp(const StockManagementApp());
-// }
-
-// class StockManagementApp extends StatelessWidget {
-//   const StockManagementApp({Key? key}) : super(key: key);
-
-//   @override
-//   Widget build(BuildContext context) {
-//     return MaterialApp(
-//       debugShowCheckedModeBanner: false,
-//       title: 'Gestion de Stock',
-//       theme: ThemeData(
-//         primaryColor: const Color(0xFF1C3144),
-//         colorScheme: ColorScheme.fromSeed(
-//           seedColor: const Color(0xFF1C3144),
-//           primary: const Color(0xFF1C3144),
-//         ),
-//         useMaterial3: true,
-//       ),
-//       home: const DashboardScreen(),
-//     );
-//   }
-// }
-
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:stock_management/providers/ProductsProvider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'helpers/database_helper.dart';
 import 'providers/auth_provider.dart';
-import 'screens/dashboard_screen.dart';
+import 'providers/dashboard_provider.dart';
 import 'screens/login_screen.dart';
+import 'screens/dashboard_screen.dart';
+import 'screens/employee_dashboard_screen.dart';
+import 'screens/users_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  try {
-    await windowManager.ensureInitialized();
-    
-    WindowOptions windowOptions = const WindowOptions(
-      size: Size(1200, 800),
-      minimumSize: Size(1000, 700),
-      center: true,
-      title: 'Gestion de Stock',
-      backgroundColor: Colors.white,
-    );
+  await windowManager.ensureInitialized();
 
-    await windowManager.waitUntilReadyToShow(windowOptions);
+  WindowOptions windowOptions = const WindowOptions(
+    size: Size(1280, 720),
+    minimumSize: Size(800, 600),
+    center: true,
+    backgroundColor: Colors.transparent,
+    skipTaskbar: false,
+    titleBarStyle: TitleBarStyle.normal,
+    title: 'Stock Management',
+  );
+
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
-  } catch (e) {
-    debugPrint('Erreur window_manager: $e');
-    // Continue même si window_manager échoue
-  }
+  });
 
-  runApp(
-    MultiProvider(
-      providers: [
-        ChangeNotifierProvider(
-          create: (_) => AuthProvider(),
-        ),
-      ],
-      child: const StockManagementApp(),
-    ),
-  );
+  print('Initializing database...');
+  await DatabaseHelper.database;
+  await DatabaseHelper.debugDatabaseState();
+  print('Resetting admin password...');
+  await DatabaseHelper.resetAdminPassword();
+  print('Debugging users...');
+  await DatabaseHelper.debugUsers();
+
+  runApp(const MyApp());
 }
 
-class StockManagementApp extends StatelessWidget {
-  const StockManagementApp({super.key});
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Gestion de Stock',
-      theme: ThemeData(
-        primaryColor: const Color(0xFF1C3144),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1C3144),
-          primary: const Color(0xFF1C3144),
-        ),
-        useMaterial3: true,
-      ),
-      initialRoute: '/',
-      routes: {
-        '/': (context) => Consumer<AuthProvider>(
-              builder: (context, auth, _) => auth.isAuthenticated 
-                  ? const DashboardScreen() 
-                  : const LoginScreen(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(create: (_) => DashboardProvider()),
+        ChangeNotifierProvider(create: (_) => ProductsProvider()),
+      ],
+      child: MaterialApp(
+        title: 'Stock Management',
+        theme: ThemeData(
+          primaryColor: const Color(0xFF1C3144),
+          scaffoldBackgroundColor: Colors.grey.shade100,
+          appBarTheme: const AppBarTheme(
+            backgroundColor: Color(0xFF1C3144),
+            foregroundColor: Colors.white,
+          ),
+          elevatedButtonTheme: ElevatedButtonThemeData(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1C3144),
+              foregroundColor: Colors.white,
             ),
-        '/login': (context) => const LoginScreen(),
-        '/dashboard': (context) => const DashboardScreen(),
-      },
+          ),
+          useMaterial3: true,
+        ),
+        initialRoute: '/login',
+        routes: {
+          '/login': (context) => const LoginScreen(),
+          '/dashboard': (context) => const DashboardScreen(),
+          '/employee_dashboard': (context) => const EmployeeDashboardScreen(),
+          '/users': (context) => const UsersScreen(),
+        },
+      ),
     );
   }
 }
