@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:stock_management/providers/auth_provider.dart';
 import '../helpers/database_helper.dart';
 import '../models/models.dart';
+import '../providers/auth_provider.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 class UsersScreen extends StatefulWidget {
   const UsersScreen({super.key});
@@ -12,27 +14,19 @@ class UsersScreen extends StatefulWidget {
 }
 
 class _UsersScreenState extends State<UsersScreen> {
-  String _selectedFilter = 'all';
+  String _selectedFilter = 'all'; // Filter: 'all', 'Administrateur', 'Vendeur'
   final _searchController = TextEditingController();
   String? _searchQuery;
+  bool _isLoading = false;
 
   @override
   void initState() {
     super.initState();
-    final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    if (!authProvider.isAdmin) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        Navigator.pushReplacementNamed(context, '/dashboard');
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Accès réservé aux administrateurs')),
-        );
-      });
-    }
     _searchController.addListener(() {
       Future.delayed(const Duration(milliseconds: 300), () {
         if (mounted) {
           setState(() {
-            _searchQuery = _searchController.text;
+            _searchQuery = _searchController.text.trim().toLowerCase();
           });
         }
       });
@@ -54,40 +48,38 @@ class _UsersScreenState extends State<UsersScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gestion des utilisateurs'),
-        backgroundColor: const Color(0xFF1C3144),
         actions: [
           IconButton(
-            icon: const Icon(Icons.add, color: Colors.white),
+            icon: const Icon(Icons.add),
             tooltip: 'Ajouter un utilisateur',
-            onPressed: () => _showAddUserDialog(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white),
-            tooltip: 'Déconnexion',
-            onPressed: () {
-              Provider.of<AuthProvider>(context, listen: false).logout();
-              Navigator.pushReplacementNamed(context, '/login');
-            },
+            onPressed: _isLoading ? null : () => _showAddUserDialog(context),
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.only(bottom: 80),
-        child: Column(
-          children: [
-            _buildHeader(theme, isDarkMode),
-            _buildFilters(theme),
-            Expanded(child: _buildUsersList(isDarkMode)),
-          ],
-        ),
+      body: Stack(
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 80), // Space for FAB
+            child: Column(
+              children: [
+                _buildHeader(theme, isDarkMode),
+                _buildFilters(theme),
+                Expanded(child: _buildUsersList(isDarkMode)),
+              ],
+            ),
+          ),
+          if (_isLoading)
+            const Center(child: CircularProgressIndicator()),
+        ],
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: () => _showAddUserDialog(context),
-        backgroundColor: const Color(0xFF1C3144),
+        onPressed: _isLoading ? null : () => _showAddUserDialog(context),
+        backgroundColor: theme.primaryColor,
         elevation: 6,
-        child: const Icon(Icons.add, color: Colors.white),
         tooltip: 'Ajouter un utilisateur',
+        child: const Icon(Icons.add, color: Colors.white),
       ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
@@ -95,7 +87,7 @@ class _UsersScreenState extends State<UsersScreen> {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+        color: theme.cardColor,
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -109,7 +101,7 @@ class _UsersScreenState extends State<UsersScreen> {
         children: [
           Row(
             children: [
-              const Icon(Icons.people, color: Color(0xFF1C3144), size: 32),
+              Icon(Icons.people, color: theme.primaryColor, size: 32),
               const SizedBox(width: 16),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -122,7 +114,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   Text(
                     'Gestion des profils et rôles',
                     style: TextStyle(
-                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                      color: theme.textTheme.bodySmall?.color?.withOpacity(0.6),
                       fontSize: 14,
                     ),
                   ),
@@ -138,7 +130,7 @@ class _UsersScreenState extends State<UsersScreen> {
               prefixIcon: const Icon(Icons.search),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
-              fillColor: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
+              fillColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
             ),
           ),
         ],
@@ -157,7 +149,7 @@ class _UsersScreenState extends State<UsersScreen> {
             const SizedBox(width: 8),
             _buildFilterChip(theme, 'Administrateurs', 'Administrateur'),
             const SizedBox(width: 8),
-            _buildFilterChip(theme, 'Employés', 'Employé'),
+            _buildFilterChip(theme, 'Vendeurs', 'Vendeur'),
           ],
         ),
       ),
@@ -174,9 +166,12 @@ class _UsersScreenState extends State<UsersScreen> {
           _selectedFilter = selected ? value : 'all';
         });
       },
-      backgroundColor: isSelected ? const Color(0xFF1C3144).withOpacity(0.1) : null,
-      selectedColor: const Color(0xFF1C3144).withOpacity(0.2),
-      checkmarkColor: const Color(0xFF1C3144),
+      backgroundColor: isSelected ? theme.primaryColor.withOpacity(0.1) : null,
+      selectedColor: theme.primaryColor.withOpacity(0.2),
+      checkmarkColor: theme.primaryColor,
+      labelStyle: TextStyle(
+        color: isSelected ? theme.primaryColor : theme.textTheme.bodyMedium?.color,
+      ),
     );
   }
 
@@ -189,7 +184,12 @@ class _UsersScreenState extends State<UsersScreen> {
         }
         if (snapshot.hasError) {
           debugPrint('Users list error: ${snapshot.error}');
-          return Center(child: Text('Erreur : ${snapshot.error}', style: const TextStyle(color: Colors.red)));
+          return Center(
+            child: Text(
+              'Erreur : ${snapshot.error}',
+              style: const TextStyle(color: Colors.red),
+            ),
+          );
         }
         final users = snapshot.data ?? [];
         if (users.isEmpty) {
@@ -197,8 +197,7 @@ class _UsersScreenState extends State<UsersScreen> {
         }
 
         final filteredUsers = users.where((user) {
-          final searchTerm = (_searchQuery ?? '').toLowerCase();
-          final matchesSearch = user.name.toLowerCase().contains(searchTerm);
+          final matchesSearch = _searchQuery == null || user.name.toLowerCase().contains(_searchQuery!);
           final matchesFilter = _selectedFilter == 'all' || user.role == _selectedFilter;
           return matchesSearch && matchesFilter;
         }).toList();
@@ -230,7 +229,11 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Widget _buildUserCard(User user, bool isDarkMode) {
-    final roleColor = user.role == 'Administrateur' ? const Color(0xFF1C3144) : Colors.green;
+    final roleColor = user.role == 'Administrateur'
+        ? Colors.blue
+        : user.role == 'Vendeur'
+            ? Colors.orange
+            : Colors.green;
     return Card(
       elevation: 0,
       color: isDarkMode ? Colors.grey.shade800 : roleColor.withOpacity(0.05),
@@ -246,7 +249,11 @@ class _UsersScreenState extends State<UsersScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
-                user.role == 'Administrateur' ? Icons.admin_panel_settings : Icons.person,
+                user.role == 'Administrateur'
+                    ? Icons.admin_panel_settings
+                    : user.role == 'Vendeur'
+                        ? Icons.store
+                        : Icons.person,
                 color: roleColor,
               ),
             ),
@@ -262,22 +269,19 @@ class _UsersScreenState extends State<UsersScreen> {
                   const SizedBox(height: 4),
                   Text(
                     'Rôle: ${user.role}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                    ),
+                    style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
                   ),
                 ],
               ),
             ),
             IconButton(
-              icon: const Icon(Icons.edit, color: Color(0xFF1C3144)),
-              onPressed: () => _showEditUserDialog(context, user),
+              icon: const Icon(Icons.edit, color: Colors.blue),
+              onPressed: _isLoading ? null : () => _showEditUserDialog(context, user),
               tooltip: 'Modifier',
             ),
             IconButton(
               icon: const Icon(Icons.delete, color: Colors.red),
-              onPressed: () => _confirmDeleteUser(context, user),
+              onPressed: _isLoading ? null : () => _confirmDeleteUser(context, user),
               tooltip: 'Supprimer',
             ),
           ],
@@ -307,19 +311,14 @@ class _UsersScreenState extends State<UsersScreen> {
     );
   }
 
-  bool _validateForm(String? name, String? role, String? password, {bool isEdit = false}) {
-    return (name != null && name.trim().isNotEmpty) &&
-           (role != null && role.isNotEmpty) &&
-           (isEdit || (password != null && password.trim().isNotEmpty));
-  }
-
   Future<void> _showAddUserDialog(BuildContext context) async {
     debugPrint('Opening add user dialog');
     String? name;
     String? role;
     String? password;
     bool isValid = false;
-    final roles = ['Administrateur', 'Employé'];
+    bool obscureText = true;
+    final roles = ['Administrateur', 'Vendeur'];
 
     showDialog(
       context: context,
@@ -350,10 +349,7 @@ class _UsersScreenState extends State<UsersScreen> {
                     border: OutlineInputBorder(),
                   ),
                   items: roles.map((role) {
-                    return DropdownMenuItem(
-                      value: role,
-                      child: Text(role),
-                    );
+                    return DropdownMenuItem(value: role, child: Text(role));
                   }).toList(),
                   onChanged: (value) {
                     setDialogState(() {
@@ -365,18 +361,34 @@ class _UsersScreenState extends State<UsersScreen> {
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Mot de passe',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscureText ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () {
+                        setDialogState(() {
+                          obscureText = !obscureText;
+                        });
+                      },
+                    ),
                   ),
-                  obscureText: true,
+                  obscureText: obscureText,
                   onChanged: (value) {
                     setDialogState(() {
-                      password = value.trim();
+                      password = value;
                       isValid = _validateForm(name, role, password);
                     });
                   },
-                  validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un mot de passe' : null,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) {
+                      return 'Entrez un mot de passe';
+                    }
+                    if (value.length < 6) {
+                      return 'Minimum 6 caractères';
+                    }
+                    return null;
+                  },
                 ),
               ],
             ),
@@ -389,34 +401,41 @@ class _UsersScreenState extends State<UsersScreen> {
             ElevatedButton(
               onPressed: isValid
                   ? () async {
+                      setState(() => _isLoading = true);
                       try {
-                        await DatabaseHelper.addUser(User(
-                          id: 0,
+                        final existingUsers = await DatabaseHelper.getUsers();
+                        if (existingUsers.any((u) => u.name.toLowerCase() == name!.toLowerCase())) {
+                          throw Exception('Un utilisateur avec ce nom existe déjà');
+                        }
+                        final hashedPassword = _hashPassword(password!);
+                        final user = User(
+                          id: 0, // Auto-incremented by DB
                           name: name!,
                           role: role!,
-                          password: password!,
-                        ));
-                        if (mounted) {
+                          password: hashedPassword,
+                        );
+                        await DatabaseHelper.addUser(user);
+                        final currentUser = context.read<AuthProvider?>()?.currentUser?.name ?? 'Inconnu';
+                        debugPrint('User added by $currentUser: ${user.name}');
+                        if (context.mounted) {
                           Navigator.pop(context);
-                          setState(() {});
+                          setState(() => _isLoading = false);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Utilisateur ajouté avec succès')),
                           );
                         }
                       } catch (e) {
                         debugPrint('Error adding user: $e');
-                        if (mounted) {
+                        if (context.mounted) {
+                          setState(() => _isLoading = false);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur lors de l\'ajout : $e')),
+                            SnackBar(content: Text('Erreur : $e')),
                           );
                         }
                       }
                     }
                   : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1C3144),
-              ),
-              child: const Text('Ajouter', style: TextStyle(color: Colors.white)),
+              child: const Text('Ajouter'),
             ),
           ],
         ),
@@ -425,12 +444,22 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Future<void> _showEditUserDialog(BuildContext context, User user) async {
-    debugPrint('Opening edit user dialog for ${user.name}');
+    debugPrint('Opening edit user dialog');
+    final roles = ['Administrateur', 'Vendeur'];
+    if (!roles.contains(user.role)) {
+      debugPrint('Invalid role for user ${user.name}: ${user.role}');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Rôle invalide pour ${user.name}: ${user.role}')),
+        );
+      }
+      return;
+    }
     String? name = user.name;
     String? role = user.role;
-    String? password = user.password;
+    String? newPassword;
     bool isValid = true;
-    final roles = ['Administrateur', 'Employé'];
+    bool obscureText = true;
 
     showDialog(
       context: context,
@@ -442,7 +471,7 @@ class _UsersScreenState extends State<UsersScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextFormField(
-                  initialValue: name,
+                  initialValue: user.name,
                   decoration: const InputDecoration(
                     labelText: 'Nom',
                     border: OutlineInputBorder(),
@@ -450,7 +479,7 @@ class _UsersScreenState extends State<UsersScreen> {
                   onChanged: (value) {
                     setDialogState(() {
                       name = value.trim();
-                      isValid = _validateForm(name, role, password, isEdit: true);
+                      isValid = _validateForm(name, role, newPassword, isEdit: true);
                     });
                   },
                   validator: (value) => value == null || value.trim().isEmpty ? 'Entrez un nom' : null,
@@ -463,31 +492,42 @@ class _UsersScreenState extends State<UsersScreen> {
                     border: OutlineInputBorder(),
                   ),
                   items: roles.map((role) {
-                    return DropdownMenuItem(
-                      value: role,
-                      child: Text(role),
-                    );
+                    return DropdownMenuItem(value: role, child: Text(role));
                   }).toList(),
                   onChanged: (value) {
                     setDialogState(() {
                       role = value;
-                      isValid = _validateForm(name, role, password, isEdit: true);
+                      isValid = _validateForm(name, role, newPassword, isEdit: true);
                     });
                   },
                   validator: (value) => value == null ? 'Sélectionnez un rôle' : null,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
-                  decoration: const InputDecoration(
-                    labelText: 'Nouveau mot de passe (laisser vide pour ne pas changer)',
-                    border: OutlineInputBorder(),
+                  decoration: InputDecoration(
+                    labelText: 'Nouveau mot de passe (optionnel)',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      icon: Icon(obscureText ? Icons.visibility : Icons.visibility_off),
+                      onPressed: () {
+                        setDialogState(() {
+                          obscureText = !obscureText;
+                        });
+                      },
+                    ),
                   ),
-                  obscureText: true,
+                  obscureText: obscureText,
                   onChanged: (value) {
                     setDialogState(() {
-                      password = value.trim().isEmpty ? user.password : value.trim();
-                      isValid = _validateForm(name, role, password, isEdit: true);
+                      newPassword = value.isEmpty ? null : value;
+                      isValid = _validateForm(name, role, newPassword, isEdit: true);
                     });
+                  },
+                  validator: (value) {
+                    if (value != null && value.isNotEmpty && value.length < 6) {
+                      return 'Minimum 6 caractères';
+                    }
+                    return null;
                   },
                 ),
               ],
@@ -501,34 +541,41 @@ class _UsersScreenState extends State<UsersScreen> {
             ElevatedButton(
               onPressed: isValid
                   ? () async {
+                      setState(() => _isLoading = true);
                       try {
-                        await DatabaseHelper.updateUser(User(
+                        final existingUsers = await DatabaseHelper.getUsers();
+                        if (name != user.name &&
+                            existingUsers.any((u) => u.name.toLowerCase() == name!.toLowerCase() && u.id != user.id)) {
+                          throw Exception('Un utilisateur avec ce nom existe déjà');
+                        }
+                        final updatedUser = User(
                           id: user.id,
                           name: name!,
                           role: role!,
-                          password: password!,
-                        ));
-                        if (mounted) {
+                          password: newPassword != null ? _hashPassword(newPassword!) : user.password,
+                        );
+                        await DatabaseHelper.updateUser(updatedUser);
+                        final currentUser = context.read<AuthProvider?>()?.currentUser?.name ?? 'Inconnu';
+                        debugPrint('User updated by $currentUser: ${updatedUser.name}');
+                        if (context.mounted) {
                           Navigator.pop(context);
-                          setState(() {});
+                          setState(() => _isLoading = false);
                           ScaffoldMessenger.of(context).showSnackBar(
                             const SnackBar(content: Text('Utilisateur modifié avec succès')),
                           );
                         }
                       } catch (e) {
                         debugPrint('Error updating user: $e');
-                        if (mounted) {
+                        if (context.mounted) {
+                          setState(() => _isLoading = false);
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Erreur lors de la mise à jour : $e')),
+                            SnackBar(content: Text('Erreur : $e')),
                           );
                         }
                       }
                     }
                   : null,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1C3144),
-              ),
-              child: const Text('Modifier', style: TextStyle(color: Colors.white)),
+              child: const Text('Modifier'),
             ),
           ],
         ),
@@ -537,44 +584,64 @@ class _UsersScreenState extends State<UsersScreen> {
   }
 
   Future<void> _confirmDeleteUser(BuildContext context, User user) async {
-    debugPrint('Confirming delete for user ${user.name}');
+    debugPrint('Opening delete user confirmation');
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Confirmer la suppression'),
-        content: Text('Voulez-vous vraiment supprimer l\'utilisateur ${user.name} ?'),
+        content: Text('Voulez-vous vraiment supprimer l\'utilisateur "${user.name}" ?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             child: const Text('Annuler'),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
+              setState(() => _isLoading = true);
               try {
+                final users = await DatabaseHelper.getUsers();
+                final admins = users.where((u) => u.role == 'Administrateur').toList();
+                if (user.role == 'Administrateur' && admins.length <= 1) {
+                  throw Exception('Impossible de supprimer le dernier administrateur');
+                }
                 await DatabaseHelper.deleteUser(user.id);
-                if (mounted) {
+                final currentUser = context.read<AuthProvider?>()?.currentUser?.name ?? 'Inconnu';
+                debugPrint('User deleted by $currentUser: ${user.name}');
+                if (context.mounted) {
                   Navigator.pop(context);
-                  setState(() {});
+                  setState(() => _isLoading = false);
                   ScaffoldMessenger.of(context).showSnackBar(
                     const SnackBar(content: Text('Utilisateur supprimé avec succès')),
                   );
                 }
               } catch (e) {
                 debugPrint('Error deleting user: $e');
-                if (mounted) {
+                if (context.mounted) {
+                  setState(() => _isLoading = false);
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Erreur lors de la suppression : $e')),
+                    SnackBar(content: Text('Erreur : $e')),
                   );
                 }
               }
             },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Supprimer', style: TextStyle(color: Colors.white)),
+            child: const Text('Supprimer'),
           ),
         ],
       ),
     );
+  }
+
+  bool _validateForm(String? name, String? role, String? password, {bool isEdit = false}) {
+    if (isEdit) {
+      return name != null && name.trim().isNotEmpty && role != null;
+    }
+    return name != null && name.trim().isNotEmpty && role != null && password != null && password.length >= 6;
+  }
+
+  String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
   }
 }

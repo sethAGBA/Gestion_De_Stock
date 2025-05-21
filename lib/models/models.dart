@@ -9,7 +9,10 @@ class Variante {
   Map<String, dynamic> toMap() => {'type': type, 'valeur': valeur};
 
   factory Variante.fromMap(Map<String, dynamic> map) {
-    return Variante(type: map['type'] as String, valeur: map['valeur'] as String);
+    return Variante(
+      type: map['type'] as String? ?? 'N/A',
+      valeur: map['valeur'] as String? ?? 'N/A',
+    );
   }
 }
 
@@ -25,6 +28,7 @@ class Produit {
   final String unite;
   final int quantiteStock;
   final int quantiteAvariee;
+  final int quantiteInitiale;
   final int stockMin;
   final int stockMax;
   final int seuilAlerte;
@@ -50,6 +54,7 @@ class Produit {
     required this.unite,
     required this.quantiteStock,
     required this.quantiteAvariee,
+    required this.quantiteInitiale,
     required this.stockMin,
     required this.stockMax,
     required this.seuilAlerte,
@@ -77,6 +82,7 @@ class Produit {
       'unite': unite,
       'quantiteStock': quantiteStock,
       'quantiteAvariee': quantiteAvariee,
+      'quantiteInitiale': quantiteInitiale,
       'stockMin': stockMin,
       'stockMax': stockMax,
       'seuilAlerte': seuilAlerte,
@@ -105,6 +111,7 @@ class Produit {
       unite: map['unite'] as String? ?? '',
       quantiteStock: (map['quantiteStock'] as num?)?.toInt() ?? 0,
       quantiteAvariee: (map['quantiteAvariee'] as num?)?.toInt() ?? 0,
+      quantiteInitiale: (map['quantiteInitiale'] as num?)?.toInt() ?? (map['quantiteStock'] as num?)?.toInt() ?? 0,
       stockMin: (map['stockMin'] as num?)?.toInt() ?? 0,
       stockMax: (map['stockMax'] as num?)?.toInt() ?? 0,
       seuilAlerte: (map['seuilAlerte'] as num?)?.toInt() ?? 0,
@@ -117,10 +124,10 @@ class Produit {
       fournisseurPrincipal: map['fournisseurPrincipal'] as String?,
       fournisseursSecondaires: List<String>.from(jsonDecode(map['fournisseursSecondaires'] as String? ?? '[]')),
       derniereEntree: map['derniereEntree'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['derniereEntree'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['derniereEntree'] as num).toInt())
           : null,
       derniereSortie: map['derniereSortie'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['derniereSortie'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['derniereSortie'] as num).toInt())
           : null,
       statut: map['statut'] as String? ?? 'disponible',
     );
@@ -433,7 +440,7 @@ class FactureArchivee {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'facture_id': factureId,
+      'factureId': factureId,
       'numero': numero,
       'bonCommandeId': bonCommandeId,
       'clientId': clientId,
@@ -448,31 +455,31 @@ class FactureArchivee {
       'montantPaye': montantPaye,
       'montantRemis': montantRemis,
       'monnaie': monnaie,
-      'motif_annulation': motifAnnulation,
-      'date_annulation': dateAnnulation.millisecondsSinceEpoch,
+      'motifAnnulation': motifAnnulation,
+      'dateAnnulation': dateAnnulation.millisecondsSinceEpoch,
     };
   }
 
   factory FactureArchivee.fromMap(Map<String, dynamic> map) {
     return FactureArchivee(
-      id: map['id'] as int,
-      factureId: map['facture_id'] as int,
-      numero: map['numero'] as String,
-      bonCommandeId: map['bonCommandeId'] as int,
-      clientId: map['clientId'] as int,
+      id: (map['id'] as num?)?.toInt() ?? 0,
+      factureId: (map['factureId'] as num?)?.toInt() ?? 0,
+      numero: map['numero'] as String? ?? '',
+      bonCommandeId: (map['bonCommandeId'] as num?)?.toInt() ?? 0,
+      clientId: (map['clientId'] as num?)?.toInt() ?? 0,
       clientNom: map['clientNom'] as String?,
       adresse: map['adresse'] as String?,
       vendeurNom: map['vendeurNom'] as String?,
       magasinAdresse: map['magasinAdresse'] as String?,
       ristourne: (map['ristourne'] as num?)?.toDouble() ?? 0.0,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      total: (map['total'] as num).toDouble(),
-      statutPaiement: map['statutPaiement'] as String,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      total: (map['total'] as num?)?.toDouble() ?? 0.0,
+      statutPaiement: map['statutPaiement'] as String? ?? '',
       montantPaye: (map['montantPaye'] as num?)?.toDouble() ?? 0.0,
       montantRemis: (map['montantRemis'] as num?)?.toDouble(),
       monnaie: (map['monnaie'] as num?)?.toDouble(),
-      motifAnnulation: map['motif_annulation'] as String,
-      dateAnnulation: DateTime.fromMillisecondsSinceEpoch(map['date_annulation'] as int),
+      motifAnnulation: map['motifAnnulation'] as String? ?? '',
+      dateAnnulation: DateTime.fromMillisecondsSinceEpoch((map['dateAnnulation'] as num?)?.toInt() ?? 0),
     );
   }
 }
@@ -588,14 +595,14 @@ class StockExit {
 
   factory StockExit.fromMap(Map<String, dynamic> map) {
     return StockExit(
-      id: map['id'] as int?,
-      produitId: map['produitId'] as int,
-      produitNom: map['produitNom'] as String,
-      quantite: map['quantite'] as int,
-      type: map['type'] as String,
+      id: (map['id'] as num?)?.toInt(),
+      produitId: (map['produitId'] as num?)?.toInt() ?? 0,
+      produitNom: map['produitNom'] as String? ?? '',
+      quantite: (map['quantite'] as num?)?.toInt() ?? 0,
+      type: map['type'] as String? ?? '',
       raison: map['raison'] as String?,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      utilisateur: map['utilisateur'] as String,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      utilisateur: map['utilisateur'] as String? ?? '',
     );
   }
 
@@ -620,7 +627,7 @@ class StockEntry {
   final int quantite;
   final String type;
   final String? source;
-  final int date;  // Stocké en millisecondes depuis epoch
+  final DateTime date;
   final String utilisateur;
 
   StockEntry({
@@ -634,8 +641,18 @@ class StockEntry {
     required this.utilisateur,
   });
 
-  // Convertit les millisecondes en DateTime pour l'affichage
-  DateTime get dateTime => DateTime.fromMillisecondsSinceEpoch(date);
+  factory StockEntry.fromMap(Map<String, dynamic> map) {
+    return StockEntry(
+      id: (map['id'] as num?)?.toInt(),
+      produitId: (map['produitId'] as num?)?.toInt() ?? 0,
+      produitNom: map['produitNom'] as String? ?? '',
+      quantite: (map['quantite'] as num?)?.toInt() ?? 0,
+      type: map['type'] as String? ?? '',
+      source: map['source'] as String?,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      utilisateur: map['utilisateur'] as String? ?? '',
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -645,22 +662,8 @@ class StockEntry {
       'quantite': quantite,
       'type': type,
       'source': source,
-      'date': date,
+      'date': date.millisecondsSinceEpoch,
       'utilisateur': utilisateur,
     };
   }
-
-  factory StockEntry.fromMap(Map<String, dynamic> map) {
-    return StockEntry(
-      id: map['id'] as int?,
-      produitId: map['produitId'] as int,
-      produitNom: map['produitNom'] as String,
-      quantite: map['quantite'] as int,
-      type: map['type'] as String,
-      source: map['source'] as String?,
-      date: map['date'] as int,
-      utilisateur: map['utilisateur'] as String,
-    );
-  }
-
 }

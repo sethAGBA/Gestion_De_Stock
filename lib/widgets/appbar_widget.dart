@@ -78,13 +78,12 @@ class AppBarWidget extends StatelessWidget {
             icon: const Icon(Icons.notifications),
             onPressed: () {},
           ),
-          if (!isSmallScreen) const SizedBox(width: 16.0),
-          if (!isSmallScreen)
-            IconButton(
-              icon: const Icon(CupertinoIcons.person_alt),
-              tooltip: 'Profil',
-              onPressed: onLogout,
-            ),
+          const SizedBox(width: 16.0),
+          IconButton(
+            icon: const Icon(Icons.logout), // Changé en icône de déconnexion
+            tooltip: 'Déconnexion', // Tooltip plus clair
+            onPressed: onLogout,
+          ),
         ],
       ),
     );
