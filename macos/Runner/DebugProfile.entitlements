@@ -10,6 +10,11 @@
     <true/>
     <key>com.apple.security.network.client</key>
     <true/>
+     <!-- Ajoutez ces lignes -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+    <key>com.apple.security.files.user-selected.read-write</key>
+    <true/>
 </dict>
 </plist>
 <!-- <?xml version="1.0" encoding="UTF-8"?>

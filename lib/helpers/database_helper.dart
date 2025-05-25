@@ -44,7 +44,6 @@ class DatabaseHelper {
 
   static Future<void> _onCreate(Database db, int version) async {
     print('Création des tables pour version $version...');
-    // Same table creation as provided (unchanged for brevity)
     await db.execute('''
       CREATE TABLE IF NOT EXISTS produits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -237,7 +236,6 @@ class DatabaseHelper {
       INSERT OR IGNORE INTO unites (nom) VALUES 
       ('Pièce'), ('Litre'), ('kg'), ('Boîte'), ('Paquet')
     ''');
-    // Insert default users with hashed passwords
     final adminPassword = _hashPassword('admin123');
     final vendeurPassword = _hashPassword('vendeur123');
     await db.execute('''
@@ -588,7 +586,6 @@ class DatabaseHelper {
         final users = await db.query('users');
         for (var user in users) {
           final password = user['password'] as String;
-          // Check if password is already hashed (64 chars for SHA-256)
           if (password.length != 64 || !RegExp(r'^[a-f0-9]{64}$').hasMatch(password)) {
             final hashedPassword = _hashPassword(password);
             await db.update(
@@ -650,8 +647,6 @@ class DatabaseHelper {
     }
   }
 
-  // Rest of the methods remain unchanged (omitted for brevity)
-  // Include all other methods from your provided DatabaseHelper here
   static Future<void> checkAndInitializeData() async {
     final db = await database;
     try {
@@ -1260,15 +1255,41 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<StockExit>> getStockExits({String? typeFilter}) async {
+  static Future<List<StockExit>> getStockExits({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération des sorties de stock...');
+      String? whereClause;
+      List<dynamic> whereArgs = [];
+
+      if (typeFilter != null) {
+        whereClause = 'type = ?';
+        whereArgs.add(typeFilter);
+      }
+
+      if (startDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        whereClause = whereClause == null ? 'date >= ?' : '$whereClause AND date >= ?';
+        whereArgs.add(start);
+      }
+
+      if (endDate != null) {
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause = whereClause == null ? 'date <= ?' : '$whereClause AND date <= ?';
+        whereArgs.add(end);
+      }
+
       final maps = await db.query(
         'stock_exits',
-        where: typeFilter != null ? 'type = ?' : null,
-        whereArgs: typeFilter != null ? [typeFilter] : null,
+        where: whereClause,
+        whereArgs: whereArgs.isEmpty ? null : whereArgs,
+        orderBy: 'date DESC',
       );
+
       print('Sorties de stock récupérées : ${maps.length}');
       return maps.map((map) => StockExit.fromMap(map)).toList();
     } catch (e) {
@@ -1277,17 +1298,40 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> getAllExits({String? typeFilter}) async {
+  static Future<List<Map<String, dynamic>>> getAllExits({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération de toutes les sorties (ventes + autres)...');
       List<Map<String, dynamic>> exits = [];
+      List<String> conditions = [];
+      List<dynamic> args = [];
 
-      final stockExits = await db.query(
-        'stock_exits',
-        where: typeFilter != null && typeFilter != 'sale' ? 'type = ?' : null,
-        whereArgs: typeFilter != null && typeFilter != 'sale' ? [typeFilter] : null,
-      );
+      // Construire les conditions pour stock_exits
+      String stockExitsQuery = 'SELECT * FROM stock_exits';
+      if (typeFilter != null && typeFilter != 'sale') {
+        conditions.add('type = ?');
+        args.add(typeFilter);
+      }
+      if (startDate != null) {
+        conditions.add('date >= ?');
+        args.add(DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch);
+      }
+      if (endDate != null) {
+        conditions.add('date <= ?');
+        args.add(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999).millisecondsSinceEpoch);
+      }
+
+      if (conditions.isNotEmpty) {
+        stockExitsQuery += ' WHERE ${conditions.join(' AND ')}';
+      }
+      stockExitsQuery += ' ORDER BY date DESC';
+
+      // Exécuter la requête pour stock_exits
+      final stockExits = await db.rawQuery(stockExitsQuery, args);
       exits.addAll(stockExits.map((e) => {
             'id': e['id'],
             'produitId': e['produitId'],
@@ -1300,8 +1344,13 @@ class DatabaseHelper {
             'source': 'stock_exit',
           }));
 
+      // Réinitialiser conditions et arguments pour les ventes
+      conditions.clear();
+      args.clear();
+
+      // Construire la requête pour les ventes (si nécessaire)
       if (typeFilter == null || typeFilter == 'sale') {
-        final saleExits = await db.rawQuery('''
+        String salesQuery = '''
           SELECT bci.id, bci.produitId, p.nom as produitNom, bci.quantite, 'sale' as type, 
                  f.numero as raison, f.date, u.name as utilisateur
           FROM bon_commande_items bci
@@ -1309,7 +1358,23 @@ class DatabaseHelper {
           JOIN produits p ON p.id = bci.produitId
           JOIN users u ON u.id = (SELECT id FROM users LIMIT 1)
           WHERE f.statut != 'Annulée'
-        ''');
+        ''';
+        if (startDate != null) {
+          conditions.add('f.date >= ?');
+          args.add(DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch);
+        }
+        if (endDate != null) {
+          conditions.add('f.date <= ?');
+          args.add(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999).millisecondsSinceEpoch);
+        }
+
+        if (conditions.isNotEmpty) {
+          salesQuery += ' AND ${conditions.join(' AND ')}';
+        }
+        salesQuery += ' ORDER BY f.date DESC';
+
+        // Exécuter la requête pour les ventes
+        final saleExits = await db.rawQuery(salesQuery, args);
         exits.addAll(saleExits.map((e) => {
               'id': e['id'],
               'produitId': e['produitId'],
@@ -1323,6 +1388,7 @@ class DatabaseHelper {
             }));
       }
 
+      // Trier toutes les sorties par date décroissante
       exits.sort((a, b) => (b['date'] as int).compareTo(a['date'] as int));
       print('Total sorties récupérées : ${exits.length}');
       return exits;
@@ -1362,18 +1428,53 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<StockEntry>> getStockEntries({String? typeFilter}) async {
+  static Future<List<StockEntry>> getStockEntries({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération des entrées de stock...');
+      String? whereClause;
+      List<dynamic> whereArgs = [];
+
+      if (typeFilter != null) {
+        whereClause = 'type = ?';
+        whereArgs.add(typeFilter);
+      }
+
+      if (startDate != null && endDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause = whereClause == null
+            ? 'date BETWEEN ? AND ?'
+            : '$whereClause AND date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      }
+
       final maps = await db.query(
         'stock_entries',
-        where: typeFilter != null ? 'type = ?' : null,
-        whereArgs: typeFilter != null ? [typeFilter] : null,
+        where: whereClause,
+        whereArgs: whereArgs.isEmpty ? null : whereArgs,
         orderBy: 'date DESC',
       );
+
       print('Entrées de stock récupérées : ${maps.length}');
-      return maps.map((map) => StockEntry.fromMap(map)).toList();
+      return maps.map((map) {
+        final dateMillis = map['date'] as int;
+        return StockEntry(
+          id: map['id'] as int,
+          produitId: map['produitId'] as int,
+          produitNom: map['produitNom'] as String,
+          quantite: map['quantite'] as int,
+          type: map['type'] as String,
+          source: map['source'] as String?,
+          date: DateTime.fromMillisecondsSinceEpoch(dateMillis),
+          utilisateur: map['utilisateur'] as String,
+        );
+      }).toList();
     } catch (e) {
       print('Erreur lors de la récupération des entrées de stock : $e');
       return [];

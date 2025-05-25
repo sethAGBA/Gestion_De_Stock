@@ -1,5 +1,7 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
+import 'package:file_picker/file_picker.dart';
 import '../models/models.dart';
 
 class ProductDialog extends StatefulWidget {
@@ -32,12 +34,13 @@ class _ProductDialogState extends State<ProductDialog> {
   String _categorie = '';
   String? _marque;
   String? _imageUrl;
+  String? _imagePath;
   String? _sku;
   String? _codeBarres;
   String _unite = '';
   int _quantiteStock = 0;
   int _quantiteAvariee = 0;
-  int _quantiteInitiale = 0; // New field
+  int _quantiteInitiale = 0;
   int _stockMin = 0;
   int _stockMax = 0;
   int _seuilAlerte = 0;
@@ -65,6 +68,7 @@ class _ProductDialogState extends State<ProductDialog> {
       _categorie = widget.categories.contains(widget.produit!.categorie) ? widget.produit!.categorie : widget.categories.first;
       _marque = widget.produit!.marque;
       _imageUrl = widget.produit!.imageUrl;
+      _imagePath = widget.produit!.imageUrl;
       _sku = widget.produit!.sku;
       _codeBarres = widget.produit!.codeBarres;
       _unite = widget.unites.contains(widget.produit!.unite) ? widget.produit!.unite : widget.unites.first;
@@ -360,9 +364,32 @@ class _ProductDialogState extends State<ProductDialog> {
     }
   }
 
+  Future<void> _pickImage() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowMultiple: false,
+        allowedExtensions: ['jpg', 'jpeg', 'png'],
+      );
+      if (result != null && result.files.isNotEmpty) {
+        setState(() {
+          _imagePath = result.files.single.path;
+          _imageUrl = _imagePath; // Update _imageUrl for saving
+          print('Image selected: $_imagePath');
+        });
+      }
+    } catch (e) {
+      print('Erreur lors de la sélection de l\'image : $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Erreur lors de la sélection : $e')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isEditing = widget.produit != null;
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Container(
@@ -433,10 +460,65 @@ class _ProductDialogState extends State<ProductDialog> {
                         onSaved: (value) => _marque = value,
                       ),
                       const SizedBox(height: 16),
-                      TextFormField(
-                        initialValue: _imageUrl,
-                        decoration: const InputDecoration(labelText: 'URL de l\'image', border: OutlineInputBorder()),
-                        onSaved: (value) => _imageUrl = value,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Image', style: TextStyle(fontSize: 16)),
+                                const SizedBox(height: 8),
+                                ElevatedButton(
+                                  onPressed: _pickImage,
+                                  style: ElevatedButton.styleFrom(
+                                    foregroundColor: Colors.white,
+                                    backgroundColor: const Color(0xFF0E5A8A),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                  ),
+                                  child: const Text('Sélectionner une image'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          _imagePath != null && File(_imagePath!).existsSync()
+                              ? Container(
+                                  width: 100,
+                                  height: 100,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: isDarkMode ? Colors.grey.shade600 : Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.file(
+                                      File(_imagePath!),
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (context, error, stackTrace) => const Icon(
+                                        Icons.broken_image,
+                                        size: 50,
+                                        color: Colors.grey,
+                                      ),
+                                    ),
+                                  ),
+                                )
+                              : Container(
+                                  width: 100,
+                                  height: 100,
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: isDarkMode ? Colors.grey.shade600 : Colors.grey.shade300),
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+                                  ),
+                                  child: const Icon(
+                                    Icons.image,
+                                    size: 50,
+                                    color: Colors.grey,
+                                  ),
+                                ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       TextFormField(

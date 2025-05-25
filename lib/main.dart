@@ -1,6 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
 import 'helpers/database_helper.dart';
 import 'providers/auth_provider.dart';
 import 'screens/dashboard_screen.dart';
@@ -9,7 +13,14 @@ import 'screens/login_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
-
+  // Initialize French locale data for intl
+  await initializeDateFormatting('fr_FR', null);
+  // Créez le dossier images
+  final appDir = await getApplicationDocumentsDirectory();
+  final imagesDir = Directory('${appDir.path}/images');
+  if (!await imagesDir.exists()) {
+    await imagesDir.create(recursive: true);
+  }
   final screen = await windowManager.getBounds();
   final screenSize = screen.size;
   final double defaultWidth = screenSize.width * 0.8;

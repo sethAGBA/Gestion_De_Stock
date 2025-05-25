@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -89,6 +90,53 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
           ),
           if (afterMatch.isNotEmpty) TextSpan(text: afterMatch),
         ],
+      ),
+    );
+  }
+
+  void _showEnlargedImage(BuildContext context, String? imageUrl) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          constraints: const BoxConstraints(maxWidth: 300, maxHeight: 350),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Expanded(
+                child: imageUrl != null && File(imageUrl).existsSync()
+                    ? Image.file(
+                        File(imageUrl),
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) => const Icon(
+                          Icons.image_not_supported,
+                          size: 100,
+                          color: Colors.grey,
+                        ),
+                      )
+                    : const Icon(
+                        Icons.image_not_supported,
+                        size: 100,
+                        color: Colors.grey,
+                      ),
+              ),
+              const SizedBox(height: 16),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: Text(
+                  'Fermer',
+                  style: TextStyle(
+                    color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -207,7 +255,7 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
                             DataColumn(label: Text('Nom')),
                             DataColumn(label: Text('Catégorie')),
                             DataColumn(label: Text('Stock')),
-                            DataColumn(label: Text('Avarié')), // Ajouté
+                            DataColumn(label: Text('Avarié')),
                             DataColumn(label: Text('Prix Vente')),
                             DataColumn(label: Text('Fournisseur')),
                             DataColumn(label: Text('Statut')),
@@ -232,25 +280,26 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
                                         ),
                                       ),
                                       DataCell(
-                                        (produit.imageUrl ?? '').isNotEmpty
-                                            ? CachedNetworkImage(
-                                                imageUrl: produit.imageUrl!,
-                                                width: 40,
-                                                height: 40,
-                                                fit: BoxFit.cover,
-                                                placeholder: (context, url) => const CircularProgressIndicator(),
-                                               
-                                                errorWidget: (context, url, error) => const Icon(
-                                                  Icons.broken_image,
+                                        GestureDetector(
+                                          onTap: () => _showEnlargedImage(context, produit.imageUrl),
+                                          child: produit.imageUrl != null && File(produit.imageUrl!).existsSync()
+                                              ? Image.file(
+                                                  File(produit.imageUrl!),
+                                                  width: 40,
+                                                  height: 40,
+                                                  fit: BoxFit.cover,
+                                                  errorBuilder: (context, error, stackTrace) => const Icon(
+                                                    Icons.image_not_supported,
+                                                    size: 40,
+                                                    color: Colors.grey,
+                                                  ),
+                                                )
+                                              : const Icon(
+                                                  Icons.image_not_supported,
                                                   size: 40,
                                                   color: Colors.grey,
                                                 ),
-                                              )
-                                            : const Icon(
-                                                Icons.image_not_supported,
-                                                size: 40,
-                                                color: Colors.grey,
-                                              ),
+                                        ),
                                       ),
                                       DataCell(
                                         _highlightText(
