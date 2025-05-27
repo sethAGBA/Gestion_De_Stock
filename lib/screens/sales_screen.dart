@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +11,10 @@ import 'package:stock_management/helpers/database_helper.dart';
 import 'package:stock_management/widgets/facture_dialog.dart';
 import '../models/models.dart';
 import '../providers/auth_provider.dart';
+import 'package:file_saver/file_saver.dart';
+import 'dart:typed_data';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({Key? key}) : super(key: key);
@@ -31,32 +38,44 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   bool _isLoadingStats = false;
   String? _sortOrder;
   final _futureKey = GlobalKey();
+  User? _currentUser;
+  String? _logoPath;
 
   @override
   void initState() {
     super.initState();
     _facturesFuture = Future.value([]);
-    _initDatabase().then((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
       setState(() {
-        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+        _currentUser = user;
       });
-      _loadVendors();
-      _loadStatistics();
-    }).catchError((e) {
-      print('Erreur lors de l\'initialisation de la base de données : $e');
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Erreur'),
-          content: Text('Erreur d\'initialisation : $e'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
+      _initDatabase().then((_) {
+        setState(() {
+          _facturesFuture = DatabaseHelper.getFactures(
+            includeArchived: true,
+            vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+          );
+        });
+        _loadVendors();
+        _loadStatistics();
+        _loadLogoPath();
+      }).catchError((e) {
+        print('Erreur lors de l\'initialisation de la base de données : $e');
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Erreur'),
+            content: Text('Erreur d\'initialisation : $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
+      });
     });
   }
 
@@ -73,29 +92,33 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   Future<void> _loadVendors() async {
     final vendors = await DatabaseHelper.getVendors();
     setState(() {
-      // _vendors = vendors;
+      _vendors = vendors;
     });
   }
 
   Future<void> _loadStatistics() async {
     setState(() => _isLoadingStats = true);
+    String? vendorToUse = _selectedVendor;
+    if (_currentUser != null && _currentUser!.role == 'Vendeur') {
+      vendorToUse = _currentUser!.name;
+    }
     final salesByProduct = await DatabaseHelper.getSalesByProduct(
       specificDay: _selectedDay,
       startDate: _startDate,
       endDate: _endDate,
-      vendor: _selectedVendor,
+      vendor: vendorToUse,
     );
     final salesByVendor = await DatabaseHelper.getSalesByVendor(
       specificDay: _selectedDay,
       startDate: _startDate,
       endDate: _endDate,
-      vendor: _selectedVendor,
+      vendor: vendorToUse,
     );
     final totalCA = await DatabaseHelper.getTotalCA(
       specificDay: _selectedDay,
       startDate: _startDate,
       endDate: _endDate,
-      vendor: _selectedVendor,
+      vendor: vendorToUse,
     );
     setState(() {
       _salesByProduct = salesByProduct;
@@ -109,9 +132,20 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
     final pdf = pw.Document();
     final dateFormat = NumberFormat('#,##0.00', 'fr_FR');
 
+    pw.ImageProvider? logoImage;
+    if (_logoPath != null && File(_logoPath!).existsSync()) {
+      final logoBytes = File(_logoPath!).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
+
     pdf.addPage(
       pw.MultiPage(
         build: (pw.Context context) => [
+          if (logoImage != null)
+            pw.Center(
+              child: pw.Image(logoImage, height: 80),
+            ),
+          pw.SizedBox(height: 10),
           pw.Header(level: 0, child: pw.Text('Rapport des Statistiques des Ventes')),
           pw.SizedBox(height: 20),
           if (_selectedDay != null)
@@ -147,14 +181,48 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
       ),
     );
 
-    await Printing.sharePdf(
-      bytes: await pdf.save(),
-      filename: 'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf',
+    final pdfBytes = await pdf.save();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Exporter le PDF'),
+        content: const Text('Que souhaitez-vous faire avec le PDF généré ?'),
+        actions: [
+         TextButton(
+  onPressed: () async {
+    final directory = await getApplicationDocumentsDirectory();
+    final fileName = 'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf';
+    final filePath = '${directory.path}/$fileName';
+    final file = File(filePath);
+    await file.writeAsBytes(pdfBytes);
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('PDF sauvegardé dans Documents : $fileName')),
+    );
+  },
+  child: const Text('Enregistrer'),
+),
+          TextButton(
+            onPressed: () async {
+              await Printing.sharePdf(
+                bytes: pdfBytes,
+                filename: 'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf',
+              );
+              Navigator.pop(context);
+            },
+            child: const Text('Partager'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
     );
   }
 
   void _showFactureDetails(Facture facture) async {
-    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     final db = await DatabaseHelper.database;
     final items = await db.rawQuery(
       '''
@@ -188,8 +256,8 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
               _buildInfoRow('Client', facture.clientNom ?? 'Non spécifié'),
               _buildInfoRow('Adresse', facture.adresse ?? 'Non spécifiée'),
               _buildInfoRow('Adresse fournisseur', facture.magasinAdresse ?? 'Non spécifié'),
-              _buildInfoRow('Vendeur', user?.name ?? 'Utilisateur inconnu'),
-              _buildInfoRow('Date', DateFormat('dd/MM/yyyy').format(facture.date)),
+              _buildInfoRow('Vendeur', facture.vendeurNom ?? 'Non spécifié'),
+              _buildInfoRow('Date', '${DateFormat('dd/MM/yyyy').format(facture.date)} à ${DateFormat('HH:mm').format(facture.date)}'),
               _buildInfoRow('Statut', facture.statut),
               _buildInfoRow('Statut paiement', facture.statutPaiement),
               _buildInfoRow('Total', '${formatter.format(facture.total)} FCFA'),
@@ -282,7 +350,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                   clientNom: facture.clientNom,
                   adresse: facture.adresse,
                   magasinAdresse: facture.magasinAdresse,
-                  vendeurNom: user?.name ?? 'Utilisateur inconnu',
+                  vendeurNom: facture.vendeurNom ?? 'Non spécifié',
                   items: items
                       .map((item) => {
                             'produitId': item['produitId'],
@@ -367,7 +435,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
               try {
                 await DatabaseHelper.cancelFacture(facture.id, motif);
                 setState(() {
-                  _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                  _facturesFuture = DatabaseHelper.getFactures(
+                    includeArchived: true,
+                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                  );
                   _loadStatistics();
                 });
                 Navigator.pop(context);
@@ -546,7 +617,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                         monnaie: monnaie,
                       );
                       setState(() {
-                        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                        _facturesFuture = DatabaseHelper.getFactures(
+                          includeArchived: true,
+                          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                        );
                         _loadStatistics();
                       });
                       Navigator.pop(context);
@@ -601,7 +675,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
         _selectedDay = picked;
         _startDate = null;
         _endDate = null;
-        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+        _facturesFuture = DatabaseHelper.getFactures(
+          includeArchived: true,
+          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+        );
         _loadStatistics();
       });
     }
@@ -621,9 +698,33 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
         _startDate = picked.start;
         _endDate = picked.end;
         _selectedDay = null;
-        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+        _facturesFuture = DatabaseHelper.getFactures(
+          includeArchived: true,
+          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+        );
         _loadStatistics();
       });
+    }
+  }
+
+  Future<void> _loadLogoPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _logoPath = prefs.getString('logo_path');
+    });
+  }
+
+  Future<void> _pickLogo(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result != null && result.files.single.path != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('logo_path', result.files.single.path!);
+      setState(() {
+        _logoPath = result.files.single.path!;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Logo enregistré !')),
+      );
     }
   }
 
@@ -649,13 +750,23 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
           Container(
             margin: const EdgeInsets.all(8.0),
             child: ElevatedButton.icon(
-              onPressed: () => FactureDialog.showAddFactureDialog(context, () {
-                setState(() {
-                  _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
-                  _loadVendors();
-                  _loadStatistics();
-                });
-              }),
+              onPressed: () {
+                final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+                FactureDialog.showAddFactureDialog(
+                  context,
+                  () {
+                    setState(() {
+                      _facturesFuture = DatabaseHelper.getFactures(
+                        includeArchived: true,
+                        vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+                      );
+                      _loadVendors();
+                      _loadStatistics();
+                    });
+                  },
+                  vendeurNom: user?.name,
+                );
+              },
               icon: const Icon(Icons.add),
               label: const Text('Nouvelle Facture'),
               style: ElevatedButton.styleFrom(
@@ -757,7 +868,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                             ElevatedButton(
                               onPressed: () {
                                 setState(() {
-                                  _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                                  _facturesFuture = DatabaseHelper.getFactures(
+                                    includeArchived: true,
+                                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                                  );
                                   _loadStatistics();
                                 });
                               },
@@ -835,13 +949,23 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                               ),
                               const SizedBox(height: 8),
                               ElevatedButton.icon(
-                                onPressed: () => FactureDialog.showAddFactureDialog(context, () {
-                                  setState(() {
-                                    _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
-                                    _loadVendors();
-                                    _loadStatistics();
-                                  });
-                                }),
+                                onPressed: () {
+                                  final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+                                  FactureDialog.showAddFactureDialog(
+                                    context,
+                                    () {
+                                      setState(() {
+                                        _facturesFuture = DatabaseHelper.getFactures(
+                                          includeArchived: true,
+                                          vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+                                        );
+                                        _loadVendors();
+                                        _loadStatistics();
+                                      });
+                                    },
+                                    vendeurNom: user?.name,
+                                  );
+                                },
                                 icon: const Icon(Icons.add),
                                 label: const Text('Créer une facture'),
                                 style: ElevatedButton.styleFrom(
@@ -868,7 +992,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                                         _endDate = null;
                                         _selectedVendor = null;
                                         _sortOrder = null;
-                                        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                                        _facturesFuture = DatabaseHelper.getFactures(
+                                          includeArchived: true,
+                                          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                                        );
                                         _loadStatistics();
                                       });
                                     },
@@ -923,11 +1050,36 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
       ),
       child: Column(
         children: [
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.image),
+                label: const Text('Choisir un logo'),
+                onPressed: () => _pickLogo(context),
+              ),
+              if (_logoPath != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8.0),
+                  child: Image.file(
+                    File(_logoPath!),
+                    height: 32,
+                    width: 32,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
           TextField(
             onChanged: (value) {
               setState(() {
                 _searchQuery = value;
-                _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                _facturesFuture = DatabaseHelper.getFactures(
+                  includeArchived: true,
+                  vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                );
               });
             },
             decoration: InputDecoration(
@@ -992,29 +1144,64 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
             ],
           ),
           const SizedBox(height: 16),
-          DropdownButton<String>(
-            hint: const Text('Sélectionner un vendeur'),
-            value: _selectedVendor,
-            isExpanded: true,
-            items: [
-              const DropdownMenuItem<String>(
-                value: null,
-                child: Text('Tous les vendeurs'),
+          if (!(_currentUser != null && _currentUser!.role == 'Vendeur')) ...[
+            DropdownButton<String>(
+              hint: const Text('Sélectionner un vendeur'),
+              value: _selectedVendor,
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('Tous les vendeurs'),
+                ),
+                ..._vendors.map((vendor) => DropdownMenuItem<String>(
+                      value: vendor,
+                      child: Text(vendor),
+                    )),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedVendor = value;
+                  _facturesFuture = DatabaseHelper.getFactures(
+                    includeArchived: true,
+                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                  );
+                  _loadStatistics();
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (_selectedDay != null ||
+              _startDate != null ||
+              _endDate != null ||
+              _selectedVendor != null ||
+              _searchQuery.isNotEmpty ||
+              _selectedFilter != 'Toutes' ||
+              _sortOrder != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: Icon(Icons.clear),
+                label: Text('Réinitialiser les filtres'),
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                    _selectedFilter = 'Toutes';
+                    _selectedDay = null;
+                    _startDate = null;
+                    _endDate = null;
+                    _selectedVendor = null;
+                    _sortOrder = null;
+                    _facturesFuture = DatabaseHelper.getFactures(
+                      includeArchived: true,
+                      vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                    );
+                    _loadStatistics();
+                  });
+                },
               ),
-              ..._vendors.map((vendor) => DropdownMenuItem<String>(
-                    value: vendor,
-                    child: Text(vendor),
-                  )),
-            ],
-            onChanged: (value) {
-              setState(() {
-                _selectedVendor = value;
-                _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
-                _loadStatistics();
-              });
-            },
-          ),
-          const SizedBox(height: 16),
+            ),
           DropdownButton<String>(
             hint: const Text('Trier par date'),
             value: _sortOrder,
@@ -1036,7 +1223,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
             onChanged: (value) {
               setState(() {
                 _sortOrder = value;
-                _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+                _facturesFuture = DatabaseHelper.getFactures(
+                  includeArchived: true,
+                  vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                );
               });
             },
           ),
@@ -1052,7 +1242,10 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
       onSelected: (bool selected) {
         setState(() {
           _selectedFilter = selected ? label : 'Toutes';
-          _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+          _facturesFuture = DatabaseHelper.getFactures(
+            includeArchived: true,
+            vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+          );
           _loadStatistics();
         });
       },
@@ -1069,7 +1262,6 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
     required bool isDarkMode,
     required ThemeData theme,
   }) {
-    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     final statusColor = facture.statut == 'Annulée'
         ? Colors.red
         : facture.statutPaiement == 'Payé'
@@ -1149,7 +1341,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                           overflow: TextOverflow.ellipsis,
                         ),
                         Text(
-                          'Vendeur: ${user?.name ?? 'Utilisateur inconnu'}',
+                          'Vendeur: ${facture.vendeurNom ?? 'Non spécifié'}',
                           style: theme.textTheme.bodyMedium,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -1185,7 +1377,7 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                               clientNom: facture.clientNom,
                               adresse: facture.adresse,
                               magasinAdresse: facture.magasinAdresse,
-                              vendeurNom: user?.name ?? 'Utilisateur inconnu',
+                              vendeurNom: facture.vendeurNom ?? 'Non spécifié',
                               items: items
                                   .map((item) => {
                                         'produitId': item['produitId'],

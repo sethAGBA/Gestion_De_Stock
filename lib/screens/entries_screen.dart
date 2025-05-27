@@ -242,8 +242,8 @@ class _EntriesScreenState extends State<EntriesScreen> {
       final file = await PdfService.saveEntriesReport(
         numero: reportTitle,
         date: DateTime.now(),
-        magasinAdresse: '123 Rue Principale, Ville',
-        utilisateurNom: 'Admin',
+        magasinAdresse: '',
+        utilisateurNom: '',
         items: items,
         totalValue: totalValue,
       );

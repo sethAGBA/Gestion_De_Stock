@@ -35,6 +35,9 @@ class DatabaseHelper {
       version: 18,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        await ensureSupplierColumns(db);
+      },
     );
   }
 
@@ -78,7 +81,11 @@ class DatabaseHelper {
         name TEXT NOT NULL,
         productName TEXT NOT NULL,
         category TEXT NOT NULL,
-        price REAL NOT NULL
+        price REAL NOT NULL,
+        contact TEXT,
+        email TEXT,
+        telephone TEXT,
+        adresse TEXT
       )
     ''');
     await db.execute('''
@@ -605,7 +612,47 @@ class DatabaseHelper {
         rethrow;
       }
     }
+    // Ajout migration pour les nouveaux champs de suppliers
+    final supplierColumns = await db.rawQuery('PRAGMA table_info(suppliers)');
+    final supplierColumnNames = supplierColumns.map((c) => c['name'] as String).toList();
+    if (!supplierColumnNames.contains('contact')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN contact TEXT');
+      print('Colonne contact ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('email')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN email TEXT');
+      print('Colonne email ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('telephone')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN telephone TEXT');
+      print('Colonne telephone ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('adresse')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN adresse TEXT');
+      print('Colonne adresse ajoutée à suppliers');
+    }
     print('Mise à jour terminée.');
+  }
+
+  static Future<void> ensureSupplierColumns(Database db) async {
+    final supplierColumns = await db.rawQuery('PRAGMA table_info(suppliers)');
+    final supplierColumnNames = supplierColumns.map((c) => c['name'] as String).toList();
+    if (!supplierColumnNames.contains('contact')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN contact TEXT');
+      print('Colonne contact ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('email')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN email TEXT');
+      print('Colonne email ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('telephone')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN telephone TEXT');
+      print('Colonne telephone ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('adresse')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN adresse TEXT');
+      print('Colonne adresse ajoutée à suppliers (onOpen)');
+    }
   }
 
   static Future<User?> loginUser(String name, String password) async {
@@ -899,14 +946,29 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<Facture>> getFactures({bool includeArchived = false}) async {
+  static Future<List<Facture>> getFactures({bool includeArchived = false, String? vendeurNom}) async {
     final db = await database;
     try {
       print('Récupération des factures...');
+      String? where;
+      List<dynamic>? whereArgs;
+      if (!includeArchived) {
+        where = 'statut = ?';
+        whereArgs = ['Active'];
+      }
+      if (vendeurNom != null) {
+        if (where != null) {
+          where += ' AND vendeurNom = ?';
+          whereArgs!.add(vendeurNom);
+        } else {
+          where = 'vendeurNom = ?';
+          whereArgs = [vendeurNom];
+        }
+      }
       final List<Map<String, dynamic>> maps = await db.query(
         'factures',
-        where: includeArchived ? null : 'statut = ?',
-        whereArgs: includeArchived ? null : ['Active'],
+        where: where,
+        whereArgs: whereArgs,
       );
       print('Factures récupérées : ${maps.length}');
       return List.generate(maps.length, (i) => Facture.fromMap(maps[i]));
@@ -1533,4 +1595,67 @@ class DatabaseHelper {
       return [];
     }
   }
+
+  static Future<List<Produit>> getLowStockProducts() async {
+    final db = await database;
+    try {
+      print('Récupération des produits en rupture ou bientôt en rupture...');
+      final List<Map<String, dynamic>> maps = await db.query(
+        'produits',
+        where: 'quantiteStock = 0 OR quantiteStock <= seuilAlerte',
+      );
+      print('Produits en rupture/bientôt en rupture récupérés : ${maps.length}');
+      return List.generate(maps.length, (i) => Produit.fromMap(maps[i]));
+    } catch (e) {
+      print('Erreur lors de la récupération des produits en rupture : $e');
+      return [];
+    }
+  }
+
+  static Future<void> addSupplier(Supplier supplier) async {
+    final db = await database;
+    try {
+      print('Ajout du fournisseur : ${supplier.name}...');
+      await db.insert('suppliers', supplier.toMap());
+      print('Fournisseur ajouté avec succès');
+    } catch (e) {
+      print('Erreur lors de l\'ajout du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> updateSupplier(Supplier supplier) async {
+    final db = await database;
+    try {
+      print('Mise à jour du fournisseur : ${supplier.name}...');
+      await db.update(
+        'suppliers',
+        supplier.toMap(),
+        where: 'id = ?',
+        whereArgs: [supplier.id],
+      );
+      print('Fournisseur mis à jour avec succès');
+    } catch (e) {
+      print('Erreur lors de la mise à jour du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> deleteSupplier(int id) async {
+    final db = await database;
+    try {
+      print('Suppression du fournisseur avec id : $id...');
+      await db.delete(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      print('Fournisseur supprimé avec succès');
+    } catch (e) {
+      print('Erreur lors de la suppression du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static getDatabase() {}
 }

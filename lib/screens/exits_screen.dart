@@ -264,8 +264,8 @@ class _ExitsScreenState extends State<ExitsScreen> {
       final file = await PdfService.saveExitsReport(
         numero: reportTitle,
         date: DateTime.now(),
-        magasinAdresse: '123 Rue Principale, Ville',
-        utilisateurNom: Provider.of<AuthProvider>(context, listen: false).currentUser?.name ?? 'Admin',
+        magasinAdresse: '',
+        utilisateurNom: '',
         items: items,
         totalValue: totalValue,
       );

@@ -53,7 +53,9 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
   }
 
   String _getDisplayStatus(Produit produit) {
-    if (produit.quantiteAvariee > 0) {
+    if (produit.quantiteStock == 0) {
+      return 'Produit en rupture';
+    } else if (produit.quantiteAvariee > 0) {
       return 'Contient avariés';
     } else if (produit.quantiteStock <= produit.seuilAlerte) {
       return 'Bientôt en rupture';
@@ -233,183 +235,189 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
                     )
                   : SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: DataTable(
-                          columnSpacing: 48.0,
-                          horizontalMargin: 32.0,
-                          dividerThickness: 0.5,
-                          headingRowHeight: 48,
-                          dataRowHeight: 48,
-                          headingTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w600,
-                            color: isDarkMode ? Colors.grey.shade300 : Colors.grey.shade700,
-                          ),
-                          dataTextStyle: theme.textTheme.bodyMedium,
-                          headingRowColor: MaterialStateProperty.resolveWith<Color>(
-                            (states) => isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
-                          ),
-                          columns: const [
-                            DataColumn(label: Text('ID')),
-                            DataColumn(label: Text('Image')),
-                            DataColumn(label: Text('Nom')),
-                            DataColumn(label: Text('Catégorie')),
-                            DataColumn(label: Text('Stock')),
-                            DataColumn(label: Text('Avarié')),
-                            DataColumn(label: Text('Prix Vente')),
-                            DataColumn(label: Text('Fournisseur')),
-                            DataColumn(label: Text('Statut')),
-                          ],
-                          rows: _filteredProduits
-                              .asMap()
-                              .entries
-                              .map(
-                                (entry) {
-                                  final int index = entry.key;
-                                  final Produit produit = entry.value;
-                                  final String displayStatus = _getDisplayStatus(produit);
-                                  return DataRow(
-                                    color: MaterialStateProperty.resolveWith<Color>(
-                                      (states) => _getStockColor(produit),
-                                    ),
-                                    cells: [
-                                      DataCell(
-                                        Text(
-                                          (index + 1).toString(),
-                                          style: theme.textTheme.bodyMedium,
-                                        ),
+                      child: Scrollbar(
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        controller: ScrollController(),
+                        notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: DataTable(
+                            columnSpacing: 48.0,
+                            horizontalMargin: 32.0,
+                            dividerThickness: 0.5,
+                            headingRowHeight: 48,
+                            dataRowHeight: 48,
+                            headingTextStyle: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: isDarkMode ? Colors.grey.shade300 : Colors.grey.shade700,
+                            ),
+                            dataTextStyle: theme.textTheme.bodyMedium,
+                            headingRowColor: MaterialStateProperty.resolveWith<Color>(
+                              (states) => isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
+                            ),
+                            columns: const [
+                              DataColumn(label: Text('ID')),
+                              DataColumn(label: Text('Image')),
+                              DataColumn(label: Text('Nom')),
+                              DataColumn(label: Text('Catégorie')),
+                              DataColumn(label: Text('Stock')),
+                              DataColumn(label: Text('Avarié')),
+                              DataColumn(label: Text('Prix Vente')),
+                              DataColumn(label: Text('Fournisseur')),
+                              DataColumn(label: Text('Statut')),
+                            ],
+                            rows: _filteredProduits
+                                .asMap()
+                                .entries
+                                .map(
+                                  (entry) {
+                                    final int index = entry.key;
+                                    final Produit produit = entry.value;
+                                    final String displayStatus = _getDisplayStatus(produit);
+                                    return DataRow(
+                                      color: MaterialStateProperty.resolveWith<Color>(
+                                        (states) => _getStockColor(produit),
                                       ),
-                                      DataCell(
-                                        GestureDetector(
-                                          onTap: () => _showEnlargedImage(context, produit.imageUrl),
-                                          child: produit.imageUrl != null && File(produit.imageUrl!).existsSync()
-                                              ? Image.file(
-                                                  File(produit.imageUrl!),
-                                                  width: 40,
-                                                  height: 40,
-                                                  fit: BoxFit.cover,
-                                                  errorBuilder: (context, error, stackTrace) => const Icon(
+                                      cells: [
+                                        DataCell(
+                                          Text(
+                                            (index + 1).toString(),
+                                            style: theme.textTheme.bodyMedium,
+                                          ),
+                                        ),
+                                        DataCell(
+                                          GestureDetector(
+                                            onTap: () => _showEnlargedImage(context, produit.imageUrl),
+                                            child: produit.imageUrl != null && File(produit.imageUrl!).existsSync()
+                                                ? Image.file(
+                                                    File(produit.imageUrl!),
+                                                    width: 40,
+                                                    height: 40,
+                                                    fit: BoxFit.cover,
+                                                    errorBuilder: (context, error, stackTrace) => const Icon(
+                                                      Icons.image_not_supported,
+                                                      size: 40,
+                                                      color: Colors.grey,
+                                                    ),
+                                                  )
+                                                : const Icon(
                                                     Icons.image_not_supported,
                                                     size: 40,
                                                     color: Colors.grey,
                                                   ),
-                                                )
-                                              : const Icon(
-                                                  Icons.image_not_supported,
-                                                  size: 40,
-                                                  color: Colors.grey,
-                                                ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _highlightText(
-                                          produit.nom ?? 'N/A',
-                                          _searchQuery,
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                          isDarkMode,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _highlightText(
-                                          produit.categorie ?? 'N/A',
-                                          _searchQuery,
-                                          theme.textTheme.bodyMedium?.copyWith(
-                                            color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
-                                          ),
-                                          isDarkMode,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Text(
-                                          '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: produit.quantiteStock <= produit.stockMin
-                                                ? Colors.red.shade500
-                                                : produit.quantiteStock <= produit.seuilAlerte
-                                                    ? Colors.orange.shade500
-                                                    : null,
-                                            fontWeight: produit.quantiteStock <= produit.seuilAlerte
-                                                ? FontWeight.w600
-                                                : null,
                                           ),
                                         ),
-                                      ),
-                                      DataCell(
-                                        Text(
-                                          '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: produit.quantiteAvariee > 0 ? Colors.red.shade500 : null,
-                                            fontWeight: produit.quantiteAvariee > 0 ? FontWeight.w600 : null,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Text(
-                                          produit.prixVente.toStringAsFixed(2),
-                                          style: theme.textTheme.bodyMedium?.copyWith(
-                                            color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
-                                            fontWeight: FontWeight.w500,
-                                          ),
-                                        ),
-                                      ),
-                                      DataCell(
-                                        _highlightText(
-                                          produit.fournisseurPrincipal ?? 'N/A',
-                                          _searchQuery,
-                                          theme.textTheme.bodyMedium,
-                                          isDarkMode,
-                                        ),
-                                      ),
-                                      DataCell(
-                                        Chip(
-                                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                          visualDensity: VisualDensity.compact,
-                                          padding: const EdgeInsets.symmetric(horizontal: 8),
-                                          label: _highlightText(
-                                            displayStatus,
+                                        DataCell(
+                                          _highlightText(
+                                            produit.nom ?? 'N/A',
                                             _searchQuery,
-                                            theme.textTheme.labelSmall?.copyWith(
-                                              color: displayStatus == 'disponible'
-                                                  ? isDarkMode
-                                                      ? Colors.green.shade200
-                                                      : Colors.green.shade800
-                                                  : displayStatus == 'Bientôt en rupture'
-                                                      ? isDarkMode
-                                                          ? Colors.orange.shade200
-                                                          : Colors.orange.shade800
-                                                      : displayStatus == 'Contient avariés'
-                                                          ? isDarkMode
-                                                              ? Colors.red.shade200
-                                                              : Colors.red.shade800
-                                                          : isDarkMode
-                                                              ? Colors.red.shade200
-                                                              : Colors.red.shade800,
+                                            theme.textTheme.bodyMedium?.copyWith(
+                                              fontWeight: FontWeight.w500,
                                             ),
                                             isDarkMode,
                                           ),
-                                          backgroundColor: displayStatus == 'disponible'
-                                              ? isDarkMode
-                                                  ? Colors.green.shade900.withOpacity(0.3)
-                                                  : Colors.green.shade100
-                                              : displayStatus == 'Bientôt en rupture'
-                                                  ? isDarkMode
-                                                      ? Colors.orange.shade900.withOpacity(0.3)
-                                                      : Colors.orange.shade100
-                                                  : isDarkMode
-                                                      ? Colors.red.shade900.withOpacity(0.3)
-                                                      : Colors.red.shade100,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(8),
+                                        ),
+                                        DataCell(
+                                          _highlightText(
+                                            produit.categorie ?? 'N/A',
+                                            _searchQuery,
+                                            theme.textTheme.bodyMedium?.copyWith(
+                                              color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
+                                            ),
+                                            isDarkMode,
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  );
-                                },
-                              )
-                              .toList(),
+                                        DataCell(
+                                          Text(
+                                            '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: produit.quantiteStock <= produit.stockMin
+                                                  ? Colors.red.shade500
+                                                  : produit.quantiteStock <= produit.seuilAlerte
+                                                      ? Colors.orange.shade500
+                                                      : null,
+                                              fontWeight: produit.quantiteStock <= produit.seuilAlerte
+                                                  ? FontWeight.w600
+                                                  : null,
+                                            ),
+                                          ),
+                                        ),
+                                        DataCell(
+                                          Text(
+                                            '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: produit.quantiteAvariee > 0 ? Colors.red.shade500 : null,
+                                              fontWeight: produit.quantiteAvariee > 0 ? FontWeight.w600 : null,
+                                            ),
+                                          ),
+                                        ),
+                                        DataCell(
+                                          Text(
+                                            produit.prixVente.toStringAsFixed(2),
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                        ),
+                                        DataCell(
+                                          _highlightText(
+                                            produit.fournisseurPrincipal ?? 'N/A',
+                                            _searchQuery,
+                                            theme.textTheme.bodyMedium,
+                                            isDarkMode,
+                                          ),
+                                        ),
+                                        DataCell(
+                                          Chip(
+                                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                            visualDensity: VisualDensity.compact,
+                                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                                            label: _highlightText(
+                                              displayStatus,
+                                              _searchQuery,
+                                              theme.textTheme.labelSmall?.copyWith(
+                                                color: displayStatus == 'disponible'
+                                                    ? isDarkMode
+                                                        ? Colors.green.shade200
+                                                        : Colors.green.shade800
+                                                    : displayStatus == 'Bientôt en rupture'
+                                                        ? isDarkMode
+                                                            ? Colors.orange.shade200
+                                                            : Colors.orange.shade800
+                                                        : displayStatus == 'Contient avariés'
+                                                            ? isDarkMode
+                                                                ? Colors.red.shade200
+                                                                : Colors.red.shade800
+                                                            : isDarkMode
+                                                                ? Colors.red.shade200
+                                                                : Colors.red.shade800,
+                                              ),
+                                              isDarkMode,
+                                            ),
+                                            backgroundColor: displayStatus == 'disponible'
+                                                ? isDarkMode
+                                                    ? Colors.green.shade900.withOpacity(0.3)
+                                                    : Colors.green.shade100
+                                                : displayStatus == 'Bientôt en rupture'
+                                                    ? isDarkMode
+                                                        ? Colors.orange.shade900.withOpacity(0.3)
+                                                        : Colors.orange.shade100
+                                                    : isDarkMode
+                                                        ? Colors.red.shade900.withOpacity(0.3)
+                                                        : Colors.red.shade100,
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                )
+                                .toList(),
+                          ),
                         ),
                       ),
                     ),

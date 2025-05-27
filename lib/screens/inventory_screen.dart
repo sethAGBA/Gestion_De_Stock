@@ -1175,21 +1175,28 @@ class _InventoryScreenState extends State<InventoryScreen> {
         backgroundColor: isDarkMode ? Colors.grey.shade800 : Colors.white,
         child: Padding(
           padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    'Inventaire',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold,
-                      color: isDarkMode ? Colors.white : const Color(0xFF0A3049),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Inventaire',
+                      style: TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.bold,
+                        color: isDarkMode ? Colors.white : const Color(0xFF0A3049),
+                      ),
                     ),
-                  ),
-                  Row(
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
                     children: [
                       SizedBox(
                         width: 300,
@@ -1206,7 +1213,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           onChanged: _filterProduits,
                         ),
                       ),
-                      const SizedBox(width: 8),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.start,
+                    children: [
                       ElevatedButton(
                         onPressed: _showInventoryDialog,
                         style: ElevatedButton.styleFrom(
@@ -1258,394 +1273,417 @@ class _InventoryScreenState extends State<InventoryScreen> {
                         ),
                         child: const Text('Exporter Excel'),
                       ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _toggleEcartDisplay,
-                        style: ElevatedButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          backgroundColor: const Color(0xFF0E5A8A),
-                          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      if (_filteredProduits.length == 1) ...[
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            await _exportInventory([_filteredProduits.first], 'produit');
+                          },
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFF0E5A8A),
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: const Text('Exporter ce produit (PDF)'),
                         ),
-                        child: Text(_showEcart ? 'Masquer écarts' : 'Afficher écarts'),
-                      ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          onPressed: () async {
+                            final produit = _filteredProduits.first;
+                            final soldStockValues = await _getSoldStockValues();
+                            final totalStockValue = produit.quantiteStock * produit.prixVente;
+                            final totalSoldValue = soldStockValues[produit.id]?['valeurVendue'] ?? 0.0;
+                            await _exportInventoryToExcel([
+                              produit
+                            ], 'produit', 'INV-${DateTime.now().millisecondsSinceEpoch}', soldStockValues, totalStockValue, totalSoldValue);
+                          },
+                          style: ElevatedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            backgroundColor: const Color(0xFF0E5A8A),
+                            padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          child: const Text('Exporter ce produit (Excel)'),
+                        ),
+                      ],
                     ],
                   ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              FutureBuilder<Map<int, Map<String, dynamic>>>(
-                future: _getSoldStockValues(),
-                builder: (context, soldSnapshot) {
-                  print('SoldStockValues FutureBuilder state: ${soldSnapshot.connectionState}');
-                  if (soldSnapshot.connectionState == ConnectionState.waiting) {
-                    return const SizedBox();
-                  }
-                  if (soldSnapshot.hasError) {
-                    print('Erreur dans SoldStockValues FutureBuilder : ${soldSnapshot.error}');
-                    return Text('Erreur : ${soldSnapshot.error}');
-                  }
-                  final soldStockValues = soldSnapshot.data ?? {};
-                  return FutureBuilder<List<Produit>>(
-                    future: _produitsFuture,
-                    builder: (context, produitSnapshot) {
-                      print('Produits FutureBuilder state: ${produitSnapshot.connectionState}, hasData: ${produitSnapshot.hasData}, hasError: ${produitSnapshot.hasError}');
-                      if (produitSnapshot.connectionState == ConnectionState.waiting && _filteredProduits.isEmpty) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      if (produitSnapshot.hasError) {
-                        print('Erreur dans Produits FutureBuilder : ${produitSnapshot.error}');
-                        return Center(child: Text('Erreur : ${produitSnapshot.error}'));
-                      }
-                      final produits = produitSnapshot.data ?? [];
-                      print('Produits loaded: ${produits.length}, filtered: ${_filteredProduits.length}');
-                      final totalStockValue = _filteredProduits.fold<double>(
-                        0.0,
-                        (sum, produit) => sum + (produit.quantiteStock * produit.prixVente),
-                      );
-                      final totalSoldValue = _filteredProduits.fold<double>(
-                        0.0,
-                        (sum, produit) => sum + (soldStockValues[produit.id]?['valeurVendue'] ?? 0.0),
-                      );
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Valeur totale du stock : ${totalStockValue.toStringAsFixed(2)} FCFA',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
+                ),
+                const SizedBox(height: 24),
+                FutureBuilder<Map<int, Map<String, dynamic>>>(
+                  future: _getSoldStockValues(),
+                  builder: (context, soldSnapshot) {
+                    print('SoldStockValues FutureBuilder state: ${soldSnapshot.connectionState}');
+                    if (soldSnapshot.connectionState == ConnectionState.waiting) {
+                      return const SizedBox();
+                    }
+                    if (soldSnapshot.hasError) {
+                      print('Erreur dans SoldStockValues FutureBuilder : ${soldSnapshot.error}');
+                      return Text('Erreur : ${soldSnapshot.error}');
+                    }
+                    final soldStockValues = soldSnapshot.data ?? {};
+                    return FutureBuilder<List<Produit>>(
+                      future: _produitsFuture,
+                      builder: (context, produitSnapshot) {
+                        print('Produits FutureBuilder state: ${produitSnapshot.connectionState}, hasData: ${produitSnapshot.hasData}, hasError: ${produitSnapshot.hasError}');
+                        if (produitSnapshot.connectionState == ConnectionState.waiting && _filteredProduits.isEmpty) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
+                        if (produitSnapshot.hasError) {
+                          print('Erreur dans Produits FutureBuilder : ${produitSnapshot.error}');
+                          return Center(child: Text('Erreur : ${produitSnapshot.error}'));
+                        }
+                        final produits = produitSnapshot.data ?? [];
+                        print('Produits loaded: ${produits.length}, filtered: ${_filteredProduits.length}');
+                        final totalStockValue = _filteredProduits.fold<double>(
+                          0.0,
+                          (sum, produit) => sum + (produit.quantiteStock * produit.prixVente),
+                        );
+                        final totalSoldValue = _filteredProduits.fold<double>(
+                          0.0,
+                          (sum, produit) => sum + (soldStockValues[produit.id]?['valeurVendue'] ?? 0.0),
+                        );
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  'Valeur totale du stock : ${totalStockValue.toStringAsFixed(2)} FCFA',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(width: 24),
-                              Text(
-                                'Valeur totale vendue : ${totalSoldValue.toStringAsFixed(2)} FCFA',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  color: isDarkMode ? Colors.blue.shade300 : Colors.blue.shade700,
+                                const SizedBox(width: 24),
+                                Text(
+                                  'Valeur totale vendue : ${totalSoldValue.toStringAsFixed(2)} FCFA',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w600,
+                                    color: isDarkMode ? Colors.blue.shade300 : Colors.blue.shade700,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 16),
-                          SizedBox(
-                            height: MediaQuery.of(context).size.height * 0.7,
-                            child: _filteredProduits.isNotEmpty
-                                ? Scrollbar(
-                                    controller: _verticalScrollController,
-                                    thumbVisibility: true,
-                                    child: SingleChildScrollView(
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            SizedBox(
+                              height: MediaQuery.of(context).size.height * 0.7,
+                              child: _filteredProduits.isNotEmpty
+                                  ? Scrollbar(
                                       controller: _verticalScrollController,
-                                      scrollDirection: Axis.vertical,
+                                      thumbVisibility: true,
                                       child: SingleChildScrollView(
-                                        scrollDirection: Axis.horizontal,
-                                        child: ConstrainedBox(
-                                          constraints: BoxConstraints(
-                                            minWidth: 1600,
-                                          ),
-                                          child: Container(
-                                            decoration: BoxDecoration(
-                                              borderRadius: BorderRadius.circular(10),
-                                              boxShadow: [
-                                                BoxShadow(
-                                                  color: isDarkMode ? Colors.black26 : Colors.grey.withOpacity(0.1),
-                                                  blurRadius: 4,
-                                                  offset: const Offset(0, 2),
-                                                ),
-                                              ],
+                                        controller: _verticalScrollController,
+                                        scrollDirection: Axis.vertical,
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: ConstrainedBox(
+                                            constraints: BoxConstraints(
+                                              minWidth: 1600,
                                             ),
-                                            child: ClipRRect(
-                                              borderRadius: BorderRadius.circular(10),
-                                              child: DataTable(
-                                                columnSpacing: 24.0,
-                                                horizontalMargin: 16.0,
-                                                dividerThickness: 0.5,
-                                                headingRowHeight: 48,
-                                                dataRowHeight: 48,
-                                                headingTextStyle: theme.textTheme.bodyMedium?.copyWith(
-                                                  fontWeight: FontWeight.w600,
-                                                  color: isDarkMode ? Colors.grey.shade300 : Colors.grey.shade700,
-                                                ),
-                                                dataTextStyle: theme.textTheme.bodyMedium,
-                                                headingRowColor: MaterialStateProperty.resolveWith<Color>(
-                                                  (states) => isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
-                                                ),
-                                                columns: [
-                                                  const DataColumn(label: Text('ID')),
-                                                  const DataColumn(label: Text('Image')),
-                                                  const DataColumn(label: Text('Nom')),
-                                                  const DataColumn(label: Text('Catégorie')),
-                                                  const DataColumn(label: Text('Stock Initial')),
-                                                  const DataColumn(label: Text('Stock')),
-                                                  const DataColumn(label: Text('Avarié')),
-                                                  if (_showEcart) const DataColumn(label: Text('Écart')),
-                                                  const DataColumn(label: Text('Valeur Stock')),
-                                                  const DataColumn(label: Text('Valeur Vendue')),
-                                                  const DataColumn(label: Text('Prix Vente')),
-                                                  const DataColumn(label: Text('Fournisseur')),
-                                                  const DataColumn(label: Text('Statut')),
-                                                  const DataColumn(label: Text('Actions')),
+                                            child: Container(
+                                              decoration: BoxDecoration(
+                                                borderRadius: BorderRadius.circular(10),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: isDarkMode ? Colors.black26 : Colors.grey.withOpacity(0.1),
+                                                    blurRadius: 4,
+                                                    offset: const Offset(0, 2),
+                                                  ),
                                                 ],
-                                                rows: [
-                                                  ..._filteredProduits.asMap().entries.map(
-                                                        (entry) {
-                                                          final int index = entry.key;
-                                                          final Produit produit = entry.value;
-                                                          final String displayStatus = _getDisplayStatus(produit);
-                                                          final stockValue = (produit.quantiteStock * produit.prixVente).toStringAsFixed(2);
-                                                          final soldValue = (soldStockValues[produit.id]?['valeurVendue'] ?? 0.0).toStringAsFixed(2);
-                                                          final ecart = produit.quantiteStock - produit.quantiteInitiale;
-                                                          return DataRow(
-                                                            color: MaterialStateProperty.resolveWith<Color>(
-                                                              (states) => _getStockColor(produit),
-                                                            ),
-                                                            cells: [
-                                                              DataCell(
-                                                                Text(
-                                                                  (index + 1).toString(),
-                                                                  style: theme.textTheme.bodyMedium,
-                                                                ),
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius: BorderRadius.circular(10),
+                                                child: DataTable(
+                                                  columnSpacing: 24.0,
+                                                  horizontalMargin: 16.0,
+                                                  dividerThickness: 0.5,
+                                                  headingRowHeight: 48,
+                                                  dataRowHeight: 48,
+                                                  headingTextStyle: theme.textTheme.bodyMedium?.copyWith(
+                                                    fontWeight: FontWeight.w600,
+                                                    color: isDarkMode ? Colors.grey.shade300 : Colors.grey.shade700,
+                                                  ),
+                                                  dataTextStyle: theme.textTheme.bodyMedium,
+                                                  headingRowColor: MaterialStateProperty.resolveWith<Color>(
+                                                    (states) => isDarkMode ? Colors.grey.shade700 : Colors.grey.shade100,
+                                                  ),
+                                                  columns: [
+                                                    const DataColumn(label: Text('ID')),
+                                                    const DataColumn(label: Text('Image')),
+                                                    const DataColumn(label: Text('Nom')),
+                                                    const DataColumn(label: Text('Catégorie')),
+                                                    const DataColumn(label: Text('Stock Initial')),
+                                                    const DataColumn(label: Text('Stock')),
+                                                    const DataColumn(label: Text('Avarié')),
+                                                    if (_showEcart) const DataColumn(label: Text('Écart')),
+                                                    const DataColumn(label: Text('Valeur Stock')),
+                                                    const DataColumn(label: Text('Valeur Vendue')),
+                                                    const DataColumn(label: Text('Prix Vente')),
+                                                    const DataColumn(label: Text('Fournisseur')),
+                                                    const DataColumn(label: Text('Statut')),
+                                                    const DataColumn(label: Text('Actions')),
+                                                  ],
+                                                  rows: [
+                                                    ..._filteredProduits.asMap().entries.map(
+                                                          (entry) {
+                                                            final int index = entry.key;
+                                                            final Produit produit = entry.value;
+                                                            final String displayStatus = _getDisplayStatus(produit);
+                                                            final stockValue = (produit.quantiteStock * produit.prixVente).toStringAsFixed(2);
+                                                            final soldValue = (soldStockValues[produit.id]?['valeurVendue'] ?? 0.0).toStringAsFixed(2);
+                                                            final ecart = produit.quantiteStock - produit.quantiteInitiale;
+                                                            return DataRow(
+                                                              color: MaterialStateProperty.resolveWith<Color>(
+                                                                (states) => _getStockColor(produit),
                                                               ),
-                                                              DataCell(
-                                                                GestureDetector(
-                                                                  onTap: () => _showEnlargedImage(context, produit.imageUrl),
-                                                                  child: produit.imageUrl != null && File(produit.imageUrl!).existsSync()
-                                                                      ? Image.file(
-                                                                          File(produit.imageUrl!),
-                                                                          width: 40,
-                                                                          height: 40,
-                                                                          fit: BoxFit.cover,
-                                                                          errorBuilder: (context, error, stackTrace) => const Icon(
+                                                              cells: [
+                                                                DataCell(
+                                                                  Text(
+                                                                    (index + 1).toString(),
+                                                                    style: theme.textTheme.bodyMedium,
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  GestureDetector(
+                                                                    onTap: () => _showEnlargedImage(context, produit.imageUrl),
+                                                                    child: produit.imageUrl != null && File(produit.imageUrl!).existsSync()
+                                                                        ? Image.file(
+                                                                            File(produit.imageUrl!),
+                                                                            width: 40,
+                                                                            height: 40,
+                                                                            fit: BoxFit.cover,
+                                                                            errorBuilder: (context, error, stackTrace) => const Icon(
+                                                                              Icons.image_not_supported,
+                                                                              size: 40,
+                                                                              color: Colors.grey,
+                                                                            ),
+                                                                          )
+                                                                        : const Icon(
                                                                             Icons.image_not_supported,
                                                                             size: 40,
                                                                             color: Colors.grey,
                                                                           ),
-                                                                        )
-                                                                      : const Icon(
-                                                                          Icons.image_not_supported,
-                                                                          size: 40,
-                                                                          color: Colors.grey,
-                                                                        ),
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                _highlightText(
-                                                                  produit.nom ?? 'N/A',
-                                                                  _searchQuery,
-                                                                  theme.textTheme.bodyMedium?.copyWith(
-                                                                    fontWeight: FontWeight.w500,
-                                                                  ),
-                                                                  isDarkMode,
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                _highlightText(
-                                                                  produit.categorie ?? 'N/A',
-                                                                  _searchQuery,
-                                                                  theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
-                                                                  ),
-                                                                  isDarkMode,
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                Text(
-                                                                  '${produit.quantiteInitiale}${produit.unite == 'kg' ? ' kg' : ''}',
-                                                                  style: theme.textTheme.bodyMedium,
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                Text(
-                                                                  '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
-                                                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: produit.quantiteStock == 0
-                                                                        ? Colors.red.shade500
-                                                                        : produit.quantiteStock <= produit.stockMin
-                                                                            ? Colors.red.shade500
-                                                                            : produit.quantiteStock <= produit.seuilAlerte
-                                                                                ? Colors.orange.shade500
-                                                                                : null,
-                                                                    fontWeight: produit.quantiteStock <= produit.seuilAlerte
-                                                                        ? FontWeight.w600
-                                                                        : null,
                                                                   ),
                                                                 ),
-                                                              ),
-                                                              DataCell(
-                                                                Text(
-                                                                  '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
-                                                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: produit.quantiteAvariee > 0 ? Colors.red.shade500 : null,
-                                                                    fontWeight: produit.quantiteAvariee > 0 ? FontWeight.w600 : null,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              if (_showEcart)
                                                                 DataCell(
-                                                                  Text(
-                                                                    '$ecart${produit.unite == 'kg' ? ' kg' : ''}',
-                                                                    style: theme.textTheme.bodyMedium?.copyWith(
-                                                                      color: ecart < 0
-                                                                          ? Colors.red.shade500
-                                                                          : ecart > 0
-                                                                              ? Colors.green.shade500
-                                                                              : null,
-                                                                      fontWeight: ecart != 0 ? FontWeight.w600 : null,
-                                                                    ),
-                                                                  ),
-                                                                ),
-                                                              DataCell(
-                                                                Text(
-                                                                  '$stockValue FCFA',
-                                                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
-                                                                    fontWeight: FontWeight.w500,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                Text(
-                                                                  '$soldValue FCFA',
-                                                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: isDarkMode ? Colors.blue.shade300 : Colors.blue.shade700,
-                                                                    fontWeight: FontWeight.w500,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                Text(
-                                                                  produit.prixVente.toStringAsFixed(2),
-                                                                  style: theme.textTheme.bodyMedium?.copyWith(
-                                                                    color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
-                                                                    fontWeight: FontWeight.w500,
-                                                                  ),
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                _highlightText(
-                                                                  produit.fournisseurPrincipal ?? 'N/A',
-                                                                  _searchQuery,
-                                                                  theme.textTheme.bodyMedium,
-                                                                  isDarkMode,
-                                                                ),
-                                                              ),
-                                                              DataCell(
-                                                                Chip(
-                                                                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                                                  visualDensity: VisualDensity.compact,
-                                                                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                                                                  label: _highlightText(
-                                                                    displayStatus,
+                                                                  _highlightText(
+                                                                    produit.nom ?? 'N/A',
                                                                     _searchQuery,
-                                                                    theme.textTheme.labelSmall?.copyWith(
-                                                                      color: displayStatus == 'disponible'
-                                                                          ? isDarkMode
-                                                                              ? Colors.green.shade200
-                                                                              : Colors.green.shade800
-                                                                          : displayStatus == 'Bientôt en rupture'
-                                                                              ? isDarkMode
-                                                                                  ? Colors.orange.shade200
-                                                                                  : Colors.orange.shade800
-                                                                              : displayStatus == 'Contient avariés'
-                                                                                  ? isDarkMode
-                                                                                      ? Colors.red.shade200
-                                                                                      : Colors.red.shade800
-                                                                                  : displayStatus == 'En rupture'
-                                                                                      ? isDarkMode
-                                                                                          ? Colors.red.shade200
-                                                                                          : Colors.red.shade800
-                                                                                      : isDarkMode
-                                                                                          ? Colors.red.shade200
-                                                                                          : Colors.red.shade800,
+                                                                    theme.textTheme.bodyMedium?.copyWith(
+                                                                      fontWeight: FontWeight.w500,
                                                                     ),
                                                                     isDarkMode,
                                                                   ),
-                                                                  backgroundColor: displayStatus == 'disponible'
-                                                                      ? isDarkMode
-                                                                          ? Colors.green.shade900.withOpacity(0.3)
-                                                                          : Colors.green.shade100
-                                                                      : displayStatus == 'Bientôt en rupture'
-                                                                          ? isDarkMode
-                                                                              ? Colors.orange.shade900.withOpacity(0.3)
-                                                                              : Colors.orange.shade100
-                                                                          : displayStatus == 'Contient avariés'
-                                                                              ? isDarkMode
-                                                                                  ? Colors.red.shade900.withOpacity(0.3)
-                                                                                  : Colors.red.shade100
-                                                                              : displayStatus == 'En rupture'
-                                                                                  ? isDarkMode
-                                                                                      ? Colors.red.shade900.withOpacity(0.3)
-                                                                                      : Colors.red.shade100
-                                                                                  : isDarkMode
-                                                                                      ? Colors.red.shade900.withOpacity(0.3)
-                                                                                      : Colors.red.shade100,
-                                                                  shape: RoundedRectangleBorder(
-                                                                    borderRadius: BorderRadius.circular(8),
+                                                                ),
+                                                                DataCell(
+                                                                  _highlightText(
+                                                                    produit.categorie ?? 'N/A',
+                                                                    _searchQuery,
+                                                                    theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
+                                                                    ),
+                                                                    isDarkMode,
                                                                   ),
                                                                 ),
-                                                              ),
-                                                              DataCell(
-                                                                IconButton(
-                                                                  icon: const Icon(Icons.edit, color: Color(0xFF0E5A8A)),
-                                                                  onPressed: () => _adjustStock(produit),
+                                                                DataCell(
+                                                                  Text(
+                                                                    '${produit.quantiteInitiale}${produit.unite == 'kg' ? ' kg' : ''}',
+                                                                    style: theme.textTheme.bodyMedium,
+                                                                  ),
                                                                 ),
-                                                              ),
-                                                            ],
-                                                          );
-                                                        },
-                                                      ),
-                                                  if (_isLoading)
-                                                    DataRow(
-                                                      cells: List.generate(
-                                                        _showEcart ? 14 : 13,
-                                                        (index) => DataCell(
-                                                          index == 0
-                                                              ? const Center(child: CircularProgressIndicator())
-                                                              : const SizedBox(),
+                                                                DataCell(
+                                                                  Text(
+                                                                    '${produit.quantiteStock}${produit.unite == 'kg' ? ' kg' : ''}',
+                                                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: produit.quantiteStock == 0
+                                                                          ? Colors.red.shade500
+                                                                          : produit.quantiteStock <= produit.stockMin
+                                                                              ? Colors.red.shade500
+                                                                              : produit.quantiteStock <= produit.seuilAlerte
+                                                                                  ? Colors.orange.shade500
+                                                                                  : null,
+                                                                      fontWeight: produit.quantiteStock <= produit.seuilAlerte
+                                                                          ? FontWeight.w600
+                                                                          : null,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  Text(
+                                                                    '${produit.quantiteAvariee}${produit.unite == 'kg' ? ' kg' : ''}',
+                                                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: produit.quantiteAvariee > 0 ? Colors.red.shade500 : null,
+                                                                      fontWeight: produit.quantiteAvariee > 0 ? FontWeight.w600 : null,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                if (_showEcart)
+                                                                  DataCell(
+                                                                    Text(
+                                                                      '$ecart${produit.unite == 'kg' ? ' kg' : ''}',
+                                                                      style: theme.textTheme.bodyMedium?.copyWith(
+                                                                        color: ecart < 0
+                                                                            ? Colors.red.shade500
+                                                                            : ecart > 0
+                                                                                ? Colors.green.shade500
+                                                                                : null,
+                                                                        fontWeight: ecart != 0 ? FontWeight.w600 : null,
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                DataCell(
+                                                                  Text(
+                                                                    '$stockValue FCFA',
+                                                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
+                                                                      fontWeight: FontWeight.w500,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  Text(
+                                                                    '$soldValue FCFA',
+                                                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: isDarkMode ? Colors.blue.shade300 : Colors.blue.shade700,
+                                                                      fontWeight: FontWeight.w500,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  Text(
+                                                                    produit.prixVente.toStringAsFixed(2),
+                                                                    style: theme.textTheme.bodyMedium?.copyWith(
+                                                                      color: isDarkMode ? Colors.green.shade300 : Colors.green.shade700,
+                                                                      fontWeight: FontWeight.w500,
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  _highlightText(
+                                                                    produit.fournisseurPrincipal ?? 'N/A',
+                                                                    _searchQuery,
+                                                                    theme.textTheme.bodyMedium,
+                                                                    isDarkMode,
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  Chip(
+                                                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                                    visualDensity: VisualDensity.compact,
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                                                                    label: _highlightText(
+                                                                      displayStatus,
+                                                                      _searchQuery,
+                                                                      theme.textTheme.labelSmall?.copyWith(
+                                                                        color: displayStatus == 'disponible'
+                                                                            ? isDarkMode
+                                                                                ? Colors.green.shade200
+                                                                                : Colors.green.shade800
+                                                                            : displayStatus == 'Bientôt en rupture'
+                                                                                ? isDarkMode
+                                                                                    ? Colors.orange.shade200
+                                                                                    : Colors.orange.shade800
+                                                                                : displayStatus == 'Contient avariés'
+                                                                                    ? isDarkMode
+                                                                                        ? Colors.red.shade200
+                                                                                        : Colors.red.shade800
+                                                                                    : displayStatus == 'En rupture'
+                                                                                        ? isDarkMode
+                                                                                            ? Colors.red.shade200
+                                                                                            : Colors.red.shade800
+                                                                                        : isDarkMode
+                                                                                            ? Colors.red.shade200
+                                                                                            : Colors.red.shade800,
+                                                                      ),
+                                                                      isDarkMode,
+                                                                    ),
+                                                                    backgroundColor: displayStatus == 'disponible'
+                                                                        ? isDarkMode
+                                                                            ? Colors.green.shade900.withOpacity(0.3)
+                                                                            : Colors.green.shade100
+                                                                        : displayStatus == 'Bientôt en rupture'
+                                                                            ? isDarkMode
+                                                                                ? Colors.orange.shade900.withOpacity(0.3)
+                                                                                : Colors.orange.shade100
+                                                                            : displayStatus == 'Contient avariés'
+                                                                                ? isDarkMode
+                                                                                    ? Colors.red.shade900.withOpacity(0.3)
+                                                                                    : Colors.red.shade100
+                                                                                : displayStatus == 'En rupture'
+                                                                                    ? isDarkMode
+                                                                                        ? Colors.red.shade900.withOpacity(0.3)
+                                                                                        : Colors.red.shade100
+                                                                                    : isDarkMode
+                                                                                        ? Colors.red.shade900.withOpacity(0.3)
+                                                                                        : Colors.red.shade100,
+                                                                    shape: RoundedRectangleBorder(
+                                                                      borderRadius: BorderRadius.circular(8),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                DataCell(
+                                                                  IconButton(
+                                                                    icon: const Icon(Icons.edit, color: Color(0xFF0E5A8A)),
+                                                                    onPressed: () => _adjustStock(produit),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            );
+                                                          },
+                                                        ),
+                                                    if (_isLoading)
+                                                      DataRow(
+                                                        cells: List.generate(
+                                                          _showEcart ? 14 : 13,
+                                                          (index) => DataCell(
+                                                            index == 0
+                                                                ? const Center(child: CircularProgressIndicator())
+                                                                : const SizedBox(),
+                                                          ),
                                                         ),
                                                       ),
-                                                    ),
-                                                ],
+                                                  ],
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
                                       ),
-                                    ),
-                                  )
-                                : Center(
-                                    child: Column(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          _searchQuery.isNotEmpty ? Icons.search_off : Icons.inventory_2_outlined,
-                                          size: 48,
-                                          color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                                        ),
-                                        const SizedBox(height: 16),
-                                        Text(
-                                          _searchQuery.isNotEmpty
-                                              ? 'Aucun produit trouvé pour cette recherche'
-                                              : 'Aucun produit disponible',
-                                          style: theme.textTheme.bodyMedium?.copyWith(
+                                    )
+                                  : Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            _searchQuery.isNotEmpty ? Icons.search_off : Icons.inventory_2_outlined,
+                                            size: 48,
                                             color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
                                           ),
-                                        ),
-                                      ],
+                                          const SizedBox(height: 16),
+                                          Text(
+                                            _searchQuery.isNotEmpty
+                                                ? 'Aucun produit trouvé pour cette recherche'
+                                                : 'Aucun produit disponible',
+                                            style: theme.textTheme.bodyMedium?.copyWith(
+                                              color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                  ),
-                          ),
-                        ],
-                      );
-                    },
-                  );
-                },
-              ),
-            ],
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),

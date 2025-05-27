@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 
-class StockMovementsChartWidget extends StatelessWidget {
+class StockMovementsChartWidget extends StatefulWidget {
   final List<String> months;
   final List<StockMovement> movements;
 
@@ -12,12 +12,20 @@ class StockMovementsChartWidget extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<StockMovementsChartWidget> createState() => _StockMovementsChartWidgetState();
+}
+
+class _StockMovementsChartWidgetState extends State<StockMovementsChartWidget> {
+  bool _animated = false;
+
+  @override
   Widget build(BuildContext context) {
-    if (months.isEmpty) {
+    if (widget.months.isEmpty) {
       return _buildEmptyState();
     }
 
     return Container(
+      height: 400.0,
       padding: const EdgeInsets.all(16.0),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -33,17 +41,34 @@ class StockMovementsChartWidget extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildHeader(),
-          const SizedBox(height: 20.0),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              _buildHeader(),
+              Row(
+                children: [
+                  const Text('Barres classiques'),
+                  Switch(
+                    value: _animated,
+                    onChanged: (val) {
+                      setState(() => _animated = val);
+                    },
+                  ),
+                  const Text('Fréquence animée'),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 36.0),
           _buildLegend(),
-          const SizedBox(height: 10.0),
-          SizedBox(
-            height: 200.0,
+          const SizedBox(height: 32.0),
+          Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: ChartWidget(
-                months: months,
-                movements: movements,
+                months: widget.months,
+                movements: widget.movements,
+                animated: _animated,
               ),
             ),
           ),
@@ -79,22 +104,12 @@ class StockMovementsChartWidget extends StatelessWidget {
   }
 
   Widget _buildHeader() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        const Text(
-          'Mouvements de stock',
-          style: TextStyle(
-            fontSize: 18.0,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-        TextButton.icon(
-          onPressed: () {},
-          icon: const Text('Voir plus'),
-          label: const Icon(Icons.arrow_forward, size: 16.0),
-        ),
-      ],
+    return const Text(
+      'Mouvements de stock',
+      style: TextStyle(
+        fontSize: 18.0,
+        fontWeight: FontWeight.bold,
+      ),
     );
   }
 
@@ -132,47 +147,102 @@ class StockMovementsChartWidget extends StatelessWidget {
   }
 }
 
-class ChartWidget extends StatelessWidget {
+class ChartWidget extends StatefulWidget {
   final List<String> months;
   final List<StockMovement> movements;
+  final bool animated;
 
   const ChartWidget({
     Key? key,
     required this.months,
     required this.movements,
+    this.animated = false,
   }) : super(key: key);
 
   @override
-  Widget build(BuildContext context) {
-    final random = Random();
-    final inValues = List.generate(months.length, (_) => 40 + random.nextInt(60));
-    final outValues = List.generate(months.length, (_) => 20 + random.nextInt(40));
-    
-    final maxValue = (inValues + outValues)
-        .reduce((a, b) => a > b ? a : b)
-        .toDouble();
+  State<ChartWidget> createState() => _ChartWidgetState();
+}
 
+class _ChartWidgetState extends State<ChartWidget> with SingleTickerProviderStateMixin {
+  late List<double> inHeights;
+  late List<double> outHeights;
+  late AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    );
+    _initHeights();
+    if (widget.animated) {
+      _controller.forward();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant ChartWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.animated != oldWidget.animated) {
+      if (widget.animated) {
+        _controller.reset();
+        _controller.forward();
+      } else {
+        _controller.reset();
+      }
+    }
+  }
+
+  void _initHeights() {
+    final random = Random();
+    final inValues = List.generate(widget.months.length, (_) => 40 + random.nextInt(60));
+    final outValues = List.generate(widget.months.length, (_) => 20 + random.nextInt(40));
+    final maxValue = (inValues + outValues).reduce((a, b) => a > b ? a : b).toDouble();
+    inHeights = inValues.map((v) => (v / maxValue) * 160).toList();
+    outHeights = outValues.map((v) => (v / maxValue) * 160).toList();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
       children: List.generate(
-        months.length,
+        widget.months.length,
         (index) {
-          final inHeight = (inValues[index] / maxValue) * 160;
-          final outHeight = (outValues[index] / maxValue) * 160;
-          
           return Padding(
             padding: const EdgeInsets.symmetric(horizontal: 8.0),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildBar(inHeight, Colors.green.shade300),
-                _buildBar(outHeight, Colors.red.shade300),
+                widget.animated
+                    ? AnimatedBuilder(
+                        animation: _controller,
+                        builder: (context, child) {
+                          return _buildBar(inHeights[index] * _controller.value, Colors.green.shade300);
+                        },
+                      )
+                    : _buildBar(inHeights[index], Colors.green.shade300),
+                widget.animated
+                    ? AnimatedBuilder(
+                        animation: _controller,
+                        builder: (context, child) {
+                          return _buildBar(outHeights[index] * _controller.value, Colors.red.shade300);
+                        },
+                      )
+                    : _buildBar(outHeights[index], Colors.red.shade300),
                 const SizedBox(height: 8.0),
                 SizedBox(
                   width: 40.0,
                   child: Text(
-                    months[index],
+                    widget.months[index],
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 12.0,

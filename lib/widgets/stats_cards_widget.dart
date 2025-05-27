@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 class StatsCardsWidget extends StatelessWidget {
@@ -33,39 +34,49 @@ class StatsCardsWidget extends StatelessWidget {
       cardWidth = (screenWidth - 64) / 4; // 4 cartes par ligne
     }
 
-    return Wrap(
-      spacing: isVerySmallScreen ? 8.0 : 16.0,
-      runSpacing: isVerySmallScreen ? 8.0 : 16.0,
-      children: [
-        _buildStatCard(
-          icon: Icons.inventory_2,
-          iconColor: Colors.blue,
-          title: '# de produits',
-          value: totalProducts.toString(),
-          width: cardWidth,
+    return Scrollbar(
+      thumbVisibility: true,
+      trackVisibility: true,
+      notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+      controller: ScrollController(),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            _buildStatCard(
+              icon: Icons.inventory_2,
+              iconColor: Colors.blue,
+              title: '# de produits',
+              value: totalProducts.toString(),
+              width: cardWidth,
+            ),
+            const SizedBox(width: 16.0),
+            _buildStatCard(
+              icon: Icons.warning,
+              iconColor: Colors.red,
+              title: 'Produits en rupture',
+              value: outOfStock.toString(),
+              width: cardWidth,
+            ),
+            const SizedBox(width: 16.0),
+            _buildStatCard(
+              icon: CupertinoIcons.money_dollar,
+              iconColor: Colors.green,
+              title: 'Valeur du stock',
+              value: 'FCFA ${stockValue.toStringAsFixed(0)}',
+              width: cardWidth,
+            ),
+            const SizedBox(width: 16.0),
+            _buildStatCard(
+              icon: Icons.trending_up,
+              iconColor: Colors.purple,
+              title: 'Produits vendus',
+              value: productsSold.toString(),
+              width: cardWidth,
+            ),
+          ],
         ),
-        _buildStatCard(
-          icon: Icons.warning,
-          iconColor: Colors.red,
-          title: 'Produits en rupture',
-          value: outOfStock.toString(),
-          width: cardWidth,
-        ),
-        _buildStatCard(
-          icon: Icons.euro,
-          iconColor: Colors.green,
-          title: 'Valeur du stock',
-          value: 'FCFA ${stockValue.toStringAsFixed(0)}',
-          width: cardWidth,
-        ),
-        _buildStatCard(
-          icon: Icons.trending_up,
-          iconColor: Colors.purple,
-          title: 'Produits vendus',
-          value: productsSold.toString(),
-          width: cardWidth,
-        ),
-      ],
+      ),
     );
   }
 

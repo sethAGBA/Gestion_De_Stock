@@ -4,6 +4,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PdfService {
   static Future<File> _generatePdf({
@@ -11,7 +12,7 @@ class PdfService {
     required DateTime date,
     required String? clientNom,
     required String? clientAdresse,
-    required String? magasinAdresse,
+    String? magasinAdresse, // fallback si pas d'info société
     required String vendeurNom,
     required List<Map<String, dynamic>> items,
     required double sousTotal,
@@ -27,8 +28,16 @@ class PdfService {
     final times = pw.Font.times();
     final timesBold = pw.Font.timesBold();
 
-    print('Generating invoice PDF with ${items.length} items: $items');
+    // Récupère toutes les infos société
+    final societe = await getSocieteInfo();
+    pw.ImageProvider? logoImage;
+    final logoPath = societe['logo'];
+    if (logoPath != null && File(logoPath).existsSync()) {
+      final logoBytes = File(logoPath).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
 
+    // Ajout de la ligne pointillée pour la signature
     final dottedLine = pw.Row(
       children: List.generate(
         40,
@@ -61,13 +70,26 @@ class PdfService {
                     border: pw.Border.all(color: PdfColors.grey),
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Center(
-                    child: pw.Text(
-                      'Logo',
-                      style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
-                    ),
-                  ),
+                  child: logoImage != null
+                      ? pw.Image(logoImage, height: 60)
+                      : pw.Center(
+                          child: pw.Text(
+                            'Logo',
+                            style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
                 ),
+                pw.SizedBox(height: 8),
+                // Infos société
+                pw.Text(societe['nom'] ?? '', style: pw.TextStyle(font: timesBold, fontSize: 14)),
+                if ((societe['adresse'] ?? '').isNotEmpty)
+                  pw.Text(societe['adresse'], style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['email'] ?? '').isNotEmpty)
+                  pw.Text('Email: ${societe['email']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['telephone'] ?? '').isNotEmpty)
+                  pw.Text('Téléphone: ${societe['telephone']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['responsable'] ?? '').isNotEmpty)
+                  pw.Text('Responsable: ${societe['responsable']}', style: pw.TextStyle(font: times, fontSize: 10)),
                 pw.SizedBox(height: 16),
                 pw.Center(
                   child: pw.Text(
@@ -84,14 +106,8 @@ class PdfService {
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
-                          pw.Text(
-                            'Adresse Fournisseur:',
-                            style: pw.TextStyle(font: timesBold, fontSize: 10, fontWeight: pw.FontWeight.bold),
-                          ),
-                          pw.Text(
-                            magasinAdresse ?? 'Non spécifié',
-                            style: pw.TextStyle(font: times, fontSize: 10),
-                          ),
+                          if ((societe['adresse'] ?? '').isNotEmpty)
+                            pw.Text(societe['adresse'], style: pw.TextStyle(font: times, fontSize: 10)),
                           pw.SizedBox(height: 16),
                           pw.Text(
                             'Numéro: $numero',
@@ -657,7 +673,7 @@ class PdfService {
   static Future<File> saveInventory({
     required String numero,
     required DateTime date,
-    required String? magasinAdresse,
+    String? magasinAdresse,
     required String utilisateurNom,
     required List<Map<String, dynamic>> items,
     required double totalStockValue,
@@ -671,10 +687,19 @@ class PdfService {
     const maxItems = 1000;
     final cappedItems = items.length > maxItems ? items.sublist(0, maxItems) : items;
     if (items.length > maxItems) {
-      print('Warning: Items list truncated from ${items.length} to $maxItems to prevent TooManyPagesException');
+      print('Warning: Items list truncated from \\${items.length} to $maxItems to prevent TooManyPagesException');
     }
 
-    print('Generating inventory PDF with ${cappedItems.length} items: $cappedItems');
+    print('Generating inventory PDF with \\${cappedItems.length} items: $cappedItems');
+
+    // Récupère toutes les infos société
+    final societe = await getSocieteInfo();
+    pw.ImageProvider? logoImage;
+    final logoPath = societe['logo'];
+    if (logoPath != null && File(logoPath).existsSync()) {
+      final logoBytes = File(logoPath).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
 
     pdf.addPage(
       pw.MultiPage(
@@ -696,13 +721,26 @@ class PdfService {
                     border: pw.Border.all(color: PdfColors.grey),
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Center(
-                    child: pw.Text(
-                      'Logo',
-                      style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
-                    ),
-                  ),
+                  child: logoImage != null
+                      ? pw.Image(logoImage, height: 60)
+                      : pw.Center(
+                          child: pw.Text(
+                            'Logo',
+                            style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
                 ),
+                pw.SizedBox(height: 8),
+                // Infos société
+                pw.Text(societe['nom'] ?? '', style: pw.TextStyle(font: timesBold, fontSize: 14)),
+                if ((societe['adresse'] ?? '').isNotEmpty)
+                  pw.Text(societe['adresse'], style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['email'] ?? '').isNotEmpty)
+                  pw.Text('Email: ${societe['email']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['telephone'] ?? '').isNotEmpty)
+                  pw.Text('Téléphone: ${societe['telephone']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['responsable'] ?? '').isNotEmpty)
+                  pw.Text('Responsable: ${societe['responsable']}', style: pw.TextStyle(font: times, fontSize: 10)),
                 pw.SizedBox(height: 16),
                 pw.Center(
                   child: pw.Text(
@@ -748,7 +786,9 @@ class PdfService {
                             style: pw.TextStyle(font: timesBold, fontSize: 10, fontWeight: pw.FontWeight.bold),
                           ),
                           pw.Text(
-                            utilisateurNom.isEmpty ? 'Non spécifié' : utilisateurNom,
+                            (utilisateurNom != null && utilisateurNom.trim().isNotEmpty)
+                              ? utilisateurNom
+                              : '..................................................',
                             style: pw.TextStyle(font: times, fontSize: 10),
                           ),
                         ],
@@ -1010,7 +1050,7 @@ class PdfService {
   static Future<File> saveEntriesReport({
     required String numero,
     required DateTime date,
-    required String? magasinAdresse,
+    String? magasinAdresse,
     required String utilisateurNom,
     required List<Map<String, dynamic>> items,
     required double totalValue,
@@ -1024,10 +1064,19 @@ class PdfService {
     const maxItems = 1000;
     final cappedItems = items.length > maxItems ? items.sublist(0, maxItems) : items;
     if (items.length > maxItems) {
-      print('Warning: Items list truncated from ${items.length} to $maxItems to prevent TooManyPagesException');
+      print('Warning: Items list truncated from \\${items.length} to $maxItems to prevent TooManyPagesException');
     }
 
-    print('Generating entries report PDF with ${cappedItems.length} items: $cappedItems');
+    print('Generating entries report PDF with \\${cappedItems.length} items: $cappedItems');
+
+    // Récupère toutes les infos société
+    final societe = await getSocieteInfo();
+    pw.ImageProvider? logoImage;
+    final logoPath = societe['logo'];
+    if (logoPath != null && File(logoPath).existsSync()) {
+      final logoBytes = File(logoPath).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
 
     pdf.addPage(
       pw.MultiPage(
@@ -1049,13 +1098,26 @@ class PdfService {
                     border: pw.Border.all(color: PdfColors.grey),
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Center(
-                    child: pw.Text(
-                      'Logo',
-                      style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
-                    ),
-                  ),
+                  child: logoImage != null
+                      ? pw.Image(logoImage, height: 60)
+                      : pw.Center(
+                          child: pw.Text(
+                            'Logo',
+                            style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
                 ),
+                pw.SizedBox(height: 8),
+                // Infos société
+                pw.Text(societe['nom'] ?? '', style: pw.TextStyle(font: timesBold, fontSize: 14)),
+                if ((societe['adresse'] ?? '').isNotEmpty)
+                  pw.Text(societe['adresse'], style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['email'] ?? '').isNotEmpty)
+                  pw.Text('Email: ${societe['email']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['telephone'] ?? '').isNotEmpty)
+                  pw.Text('Téléphone: ${societe['telephone']}', style: pw.TextStyle(font: times, fontSize: 10)),
+                if ((societe['responsable'] ?? '').isNotEmpty)
+                  pw.Text('Responsable: ${societe['responsable']}', style: pw.TextStyle(font: times, fontSize: 10)),
                 pw.SizedBox(height: 16),
                 pw.Center(
                   child: pw.Text(
@@ -1101,7 +1163,9 @@ class PdfService {
                             style: pw.TextStyle(font: timesBold, fontSize: 10, fontWeight: pw.FontWeight.bold),
                           ),
                           pw.Text(
-                            utilisateurNom.isEmpty ? 'Non spécifié' : utilisateurNom,
+                            (utilisateurNom != null && utilisateurNom.trim().isNotEmpty)
+                              ? utilisateurNom
+                              : '..................................................',
                             style: pw.TextStyle(font: times, fontSize: 10),
                           ),
                         ],
@@ -1431,6 +1495,15 @@ class PdfService {
 
     print('Generating exits report PDF with ${cappedItems.length} items: $cappedItems');
 
+    // Ajout du logo si défini
+    pw.ImageProvider? logoImage;
+    final prefs = await SharedPreferences.getInstance();
+    final logoPath = prefs.getString('logo_path');
+    if (logoPath != null && File(logoPath).existsSync()) {
+      final logoBytes = File(logoPath).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
+
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
@@ -1451,12 +1524,14 @@ class PdfService {
                     border: pw.Border.all(color: PdfColors.grey),
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Center(
-                    child: pw.Text(
-                      'Logo',
-                      style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
-                    ),
-                  ),
+                  child: logoImage != null
+                      ? pw.Image(logoImage, height: 60)
+                      : pw.Center(
+                          child: pw.Text(
+                            'Logo',
+                            style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
                 ),
                 pw.SizedBox(height: 16),
                 pw.Center(
@@ -1503,7 +1578,9 @@ class PdfService {
                             style: pw.TextStyle(font: timesBold, fontSize: 10, fontWeight: pw.FontWeight.bold),
                           ),
                           pw.Text(
-                            utilisateurNom.isEmpty ? 'Non spécifié' : utilisateurNom,
+                            (utilisateurNom != null && utilisateurNom.trim().isNotEmpty)
+                              ? utilisateurNom
+                              : '..................................................',
                             style: pw.TextStyle(font: times, fontSize: 10),
                           ),
                         ],
@@ -1806,6 +1883,15 @@ class PdfService {
     print('Generating single product report PDF for product: ${product['nom']}, '
         '${cappedEntries.length} entries, ${cappedExits.length} exits');
 
+    // Ajout du logo si défini
+    pw.ImageProvider? logoImage;
+    final prefs = await SharedPreferences.getInstance();
+    final logoPath = prefs.getString('logo_path');
+    if (logoPath != null && File(logoPath).existsSync()) {
+      final logoBytes = File(logoPath).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
+
     final dottedLine = pw.Row(
       children: List.generate(
         40,
@@ -1838,12 +1924,14 @@ class PdfService {
                     border: pw.Border.all(color: PdfColors.grey),
                     borderRadius: pw.BorderRadius.circular(4),
                   ),
-                  child: pw.Center(
-                    child: pw.Text(
-                      'Logo',
-                      style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
-                    ),
-                  ),
+                  child: logoImage != null
+                      ? pw.Image(logoImage, height: 60)
+                      : pw.Center(
+                          child: pw.Text(
+                            'Logo',
+                            style: pw.TextStyle(font: times, fontSize: 10, color: PdfColors.grey),
+                          ),
+                        ),
                 ),
                 pw.SizedBox(height: 16),
                 pw.Center(
@@ -1890,7 +1978,9 @@ class PdfService {
                             style: pw.TextStyle(font: timesBold, fontSize: 10, fontWeight: pw.FontWeight.bold),
                           ),
                           pw.Text(
-                            utilisateurNom.isEmpty ? 'Non spécifié' : utilisateurNom,
+                            (utilisateurNom != null && utilisateurNom.trim().isNotEmpty)
+                              ? utilisateurNom
+                              : '..................................................',
                             style: pw.TextStyle(font: times, fontSize: 10),
                           ),
                         ],
@@ -2398,5 +2488,18 @@ class PdfService {
     final file = File('${directory.path}/produit_${numero}.pdf');
     await file.writeAsBytes(await pdf.save());
     return file;
+  }
+
+  /// Charge toutes les infos société depuis SharedPreferences
+  static Future<Map<String, dynamic>> getSocieteInfo() async {
+    final prefs = await SharedPreferences.getInstance();
+    return {
+      'nom': prefs.getString('societe_nom') ?? '',
+      'email': prefs.getString('societe_email') ?? '',
+      'telephone': prefs.getString('societe_telephone') ?? '',
+      'adresse': prefs.getString('societe_adresse') ?? '',
+      'responsable': prefs.getString('societe_responsable') ?? '',
+      'logo': prefs.getString('societe_logo'),
+    };
   }
 }

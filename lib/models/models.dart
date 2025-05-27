@@ -140,6 +140,10 @@ class Supplier {
   final String productName;
   final String category;
   final double price;
+  final String contact;
+  final String email;
+  final String telephone;
+  final String adresse;
 
   Supplier({
     required this.id,
@@ -147,6 +151,10 @@ class Supplier {
     required this.productName,
     required this.category,
     required this.price,
+    required this.contact,
+    required this.email,
+    required this.telephone,
+    required this.adresse,
   });
 
   Map<String, dynamic> toMap() {
@@ -156,6 +164,10 @@ class Supplier {
       'productName': productName,
       'category': category,
       'price': price,
+      'contact': contact,
+      'email': email,
+      'telephone': telephone,
+      'adresse': adresse,
     };
   }
 
@@ -166,6 +178,10 @@ class Supplier {
       productName: map['productName'] as String? ?? '',
       category: map['category'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
+      contact: map['contact'] as String? ?? '',
+      email: map['email'] as String? ?? '',
+      telephone: map['telephone'] as String? ?? '',
+      adresse: map['adresse'] as String? ?? '',
     );
   }
 }

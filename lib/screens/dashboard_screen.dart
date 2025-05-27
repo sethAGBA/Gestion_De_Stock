@@ -19,6 +19,7 @@ import '../models/models.dart';
 import '../widgets/stock_movements_chart_widget.dart';
 import '../widgets/suppliers_table_widget.dart';
 import '../widgets/users_table_widget.dart' show UsersTableWidget;
+import 'package:provider/provider.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({Key? key}) : super(key: key);
@@ -32,8 +33,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late Future<List<Supplier>> _suppliersFuture;
   late Future<List<User>> _usersFuture;
   late Future<int> _productsSoldFuture;
-  final List<String> months = ['Mai', 'Juin', 'Juillet', 'Août', 'Octobre'];
+  final List<String> months = ['Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
   int _selectedIndex = 0;
+  final GlobalKey<AppBarWidgetState> appBarKey = GlobalKey<AppBarWidgetState>();
 
   @override
   void initState() {
@@ -64,6 +66,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       _suppliersFuture = DatabaseHelper.getSuppliers();
       _usersFuture = DatabaseHelper.getUsers();
       _productsSoldFuture = DatabaseHelper.getTotalProductsSold();
+    });
+    // Rafraîchir dynamiquement les alertes de rupture de stock
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (appBarKey.currentState != null) {
+        appBarKey.currentState!.fetchAlerts();
+      }
     });
   }
 
@@ -209,6 +217,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     AppBarWidget(
+                      key: appBarKey,
                       isSmallScreen: isVerySmallScreen,
                       onMenuPressed: isVerySmallScreen
                           ? () => Scaffold.of(context).openDrawer()
@@ -258,124 +267,162 @@ class DashboardContent extends StatelessWidget {
     final screenWidth = MediaQuery.of(context).size.width;
     final isSmallScreen = screenWidth < 1200;
 
-    return Scrollbar(
-      thickness: 8.0,
-      thumbVisibility: true,
-      radius: const Radius.circular(4.0),
-      child: ScrollbarTheme(
-        data: ScrollbarThemeData(
-          thumbColor: MaterialStateProperty.all(Colors.blue.shade400),
-        ),
-        child: SingleChildScrollView(
-          padding: EdgeInsets.symmetric(
-            horizontal: screenWidth < 800 ? 8.0 : 16.0,
-            vertical: 16.0,
+    return SingleChildScrollView(
+      padding: EdgeInsets.symmetric(
+        horizontal: screenWidth < 800 ? 8.0 : 16.0,
+        vertical: 16.0,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Tableau de bord',
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: isDarkMode ? Colors.white : Colors.grey.shade900,
+            ),
           ),
-          child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Tableau de bord',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: isDarkMode ? Colors.white : Colors.grey.shade900,
+          const SizedBox(height: 24.0),
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+              borderRadius: BorderRadius.circular(12.0),
+              boxShadow: [
+                if (!isDarkMode)
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: StatsCardsWidget(
+                totalProducts: produits.length,
+                outOfStock: produits.where((p) => p.quantiteStock <= p.stockMin).length,
+                stockValue: produits.isNotEmpty
+                    ? produits
+                        .map((p) => (p.prixVente) * p.quantiteStock)
+                        .reduce((a, b) => a + b)
+                    : 0.0,
+                productsSold: productsSold,
+                screenWidth: screenWidth,
               ),
             ),
-            const SizedBox(height: 24.0),
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: isDarkMode ? Colors.grey.shade800 : Colors.white,
-                borderRadius: BorderRadius.circular(12.0),
-                boxShadow: [
-                  if (!isDarkMode)
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10.0,
-                      offset: const Offset(0, 4),
-                    ),
-                ],
-              ),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: StatsCardsWidget(
-                  totalProducts: produits.length,
-                  outOfStock: produits.where((p) => p.quantiteStock <= p.stockMin).length,
-                  stockValue: produits.isNotEmpty
-                      ? produits
-                          .map((p) => (p.prixVente) * p.quantiteStock)
-                          .reduce((a, b) => a + b)
-                      : 0.0,
-                  productsSold: productsSold,
-                  screenWidth: screenWidth,
-                ),
-              ),
+          ),
+          const SizedBox(height: 24.0),
+          Container(
+            width: screenWidth * 0.9,
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+              borderRadius: BorderRadius.circular(12.0),
+              boxShadow: [
+                if (!isDarkMode)
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+              ],
             ),
-            const SizedBox(height: 24.0),
-            Container(
-              width: screenWidth * 0.9,
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: isDarkMode ? Colors.grey.shade800 : Colors.white,
-                borderRadius: BorderRadius.circular(12.0),
-                boxShadow: [
-                  if (!isDarkMode)
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10.0,
-                      offset: const Offset(0, 4),
-                    ),
-                ],
-              ),
-              child: produits.isEmpty
-                  ? Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.inventory_2_outlined,
-                            size: 48,
+            child: produits.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.inventory_2_outlined,
+                          size: 48,
+                          color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'Aucun produit disponible',
+                          style: theme.textTheme.bodyMedium?.copyWith(
                             color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
                           ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'Aucun produit disponible',
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
-                            ),
-                          ),
-                        ],
-                      ),
-                    )
-                  : SingleChildScrollView(
-                      child: ProductsTableWidget(produits: produits),
+                        ),
+                      ],
                     ),
+                  )
+                : SingleChildScrollView(
+                    child: ProductsTableWidget(produits: produits),
+                  ),
+          ),
+          const SizedBox(height: 24.0),
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            decoration: BoxDecoration(
+              color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+              borderRadius: BorderRadius.circular(12.0),
+              boxShadow: [
+                if (!isDarkMode)
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
+                    blurRadius: 10.0,
+                    offset: const Offset(0, 4),
+                  ),
+              ],
             ),
-            const SizedBox(height: 24.0),
-            Container(
-              padding: const EdgeInsets.all(16.0),
-              decoration: BoxDecoration(
-                color: isDarkMode ? Colors.grey.shade800 : Colors.white,
-                borderRadius: BorderRadius.circular(12.0),
-                boxShadow: [
-                  if (!isDarkMode)
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10.0,
-                      offset: const Offset(0, 4),
-                    ),
-                ],
-              ),
-              child: SingleChildScrollView(
+            child: SizedBox(
+              height: 300.0,
+              child: ClipRect(
                 child: StockMovementsChartWidget(months: months),
               ),
             ),
-            const SizedBox(height: 24.0),
-            isSmallScreen
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Container(
+          ),
+          const SizedBox(height: 24.0),
+          isSmallScreen
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+                        borderRadius: BorderRadius.circular(12.0),
+                        boxShadow: [
+                          if (!isDarkMode)
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10.0,
+                              offset: const Offset(0, 4),
+                            ),
+                        ],
+                      ),
+                      child: SingleChildScrollView(
+                        child: SuppliersTableWidget(suppliers: suppliers),
+                      ),
+                    ),
+                    const SizedBox(height: 24.0),
+                    Container(
+                      padding: const EdgeInsets.all(16.0),
+                      decoration: BoxDecoration(
+                        color: isDarkMode ? Colors.grey.shade800 : Colors.white,
+                        borderRadius: BorderRadius.circular(12.0),
+                        boxShadow: [
+                          if (!isDarkMode)
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.05),
+                              blurRadius: 10.0,
+                              offset: const Offset(0, 4),
+                            ),
+                        ],
+                      ),
+                      child: SingleChildScrollView(
+                        child: UsersTableWidget(users: users),
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Container(
                         padding: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
                           color: isDarkMode ? Colors.grey.shade800 : Colors.white,
@@ -393,8 +440,10 @@ class DashboardContent extends StatelessWidget {
                           child: SuppliersTableWidget(suppliers: suppliers),
                         ),
                       ),
-                      const SizedBox(height: 24.0),
-                      Container(
+                    ),
+                    const SizedBox(width: 24.0),
+                    Expanded(
+                      child: Container(
                         padding: const EdgeInsets.all(16.0),
                         decoration: BoxDecoration(
                           color: isDarkMode ? Colors.grey.shade800 : Colors.white,
@@ -412,57 +461,11 @@ class DashboardContent extends StatelessWidget {
                           child: UsersTableWidget(users: users),
                         ),
                       ),
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(16.0),
-                          decoration: BoxDecoration(
-                            color: isDarkMode ? Colors.grey.shade800 : Colors.white,
-                            borderRadius: BorderRadius.circular(12.0),
-                            boxShadow: [
-                              if (!isDarkMode)
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10.0,
-                                  offset: const Offset(0, 4),
-                                ),
-                            ],
-                          ),
-                          child: SingleChildScrollView(
-                            child: SuppliersTableWidget(suppliers: suppliers),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 24.0),
-                      Expanded(
-                        child: Container(
-                          padding: const EdgeInsets.all(16.0),
-                          decoration: BoxDecoration(
-                            color: isDarkMode ? Colors.grey.shade800 : Colors.white,
-                            borderRadius: BorderRadius.circular(12.0),
-                            boxShadow: [
-                              if (!isDarkMode)
-                                BoxShadow(
-                                  color: Colors.black.withOpacity(0.05),
-                                  blurRadius: 10.0,
-                                  offset: const Offset(0, 4),
-                                ),
-                            ],
-                          ),
-                          child: SingleChildScrollView(
-                            child: UsersTableWidget(users: users),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-          ],
-        ),
+                    ),
+                  ],
+                ),
+        ],
       ),
-    ),
-  );
-}}
+    );
+  }
+}

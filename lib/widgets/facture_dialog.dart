@@ -8,9 +8,14 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FactureDialog {
-  static void showAddFactureDialog(BuildContext context, VoidCallback onFactureCreated) async {
+  static void showAddFactureDialog(
+    BuildContext context,
+    VoidCallback onFactureCreated, {
+    String? vendeurNom, // ADDED: Accept vendeurNom parameter
+  }) async {
     final clients = await DatabaseHelper.getClients();
     final produits = await DatabaseHelper.getProduits();
     Client? selectedClient;
@@ -26,7 +31,6 @@ class FactureDialog {
     final selectedItems = <Map<String, dynamic>>[];
     final quantiteControllers = <int, TextEditingController>{};
     final formatter = NumberFormat('#,##0.00', 'fr_FR');
-    const loggedInUser = 'Admin';
     String productSearchQuery = '';
     final tabController = TabController(length: 3, vsync: Navigator.of(context));
 
@@ -240,11 +244,11 @@ class FactureDialog {
                                         quantiteControllers.putIfAbsent(produit.id, () => TextEditingController());
                                     return Card(
                                       elevation: 2.0,
-                                      margin: const EdgeInsets.symmetric(vertical: 4.0),
+                                      margin: const EdgeInsets.symmetric(vertical: 8.0), // CHANGED: 4.0 -> 8.0 for better spacing
                                       child: ListTile(
-                                        title: Text(produit.nom),
+                                        title: Text(produit.nom ?? 'Produit sans nom'), // CHANGED: Added null check
                                         subtitle:
-                                            Text('${formatter.format(produit.prixVente)} FCFA / ${produit.unite}'),
+                                            Text('${formatter.format(produit.prixVente ?? 0.0)} FCFA / ${produit.unite ?? 'Unité'}'), // CHANGED: Added null checks
                                         trailing: SizedBox(
                                           width: 80,
                                           child: TextField(
@@ -293,11 +297,11 @@ class FactureDialog {
                                       const Divider(),
                                       Text(
                                           'Numéro: FACT${DateTime.now().year}-${(selectedItems.isNotEmpty ? 1 : 0).toString().padLeft(4, '0')}'),
-                                      Text('Date: ${DateTime.now().toString().substring(0, 10)}'),
+                                      Text('Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())} à ${DateFormat('HH:mm').format(DateTime.now())}'),
                                       Text('Client: ${clientNom ?? '............................'}'),
                                       Text('Adresse client: ${adresse ?? 'Non spécifiée'}'),
                                       Text('Adresse fournisseur: ${magasinAdresse ?? 'Non spécifié'}'),
-                                      Text('Vendeur: $loggedInUser'),
+                                      Text('Vendeur: ${vendeurNom ?? 'Non spécifié'}'), // CHANGED: Use vendeurNom
                                       const SizedBox(height: 8.0),
                                       const Text('Articles:', style: TextStyle(fontWeight: FontWeight.bold)),
                                       ...selectedItems.map((item) => Padding(
@@ -350,7 +354,7 @@ class FactureDialog {
                         clientNom: clientNom,
                         adresse: adresse,
                         magasinAdresse: magasinAdresse,
-                        vendeurNom: loggedInUser,
+                        vendeurNom: vendeurNom ?? 'Non spécifié', // CHANGED: Use vendeurNom
                         items: selectedItems,
                         sousTotal: sousTotal,
                         ristourne: ristourne,
@@ -437,7 +441,7 @@ class FactureDialog {
                           'clientId': selectedClient?.id ?? 0,
                           'clientNom': clientNom,
                           'adresse': adresse,
-                          'vendeurNom': loggedInUser,
+                          'vendeurNom': vendeurNom, // CHANGED: Use vendeurNom
                           'magasinAdresse': magasinAdresse,
                           'ristourne': ristourne,
                           'date': DateTime.now().millisecondsSinceEpoch,
@@ -448,6 +452,19 @@ class FactureDialog {
                           'monnaie': monnaie,
                           'statut': 'Active',
                         });
+
+                        // AJOUT : Créer une sortie de stock de type 'sale' pour chaque produit vendu
+                        for (var item in selectedItems) {
+                          await txn.insert('stock_exits', {
+                            'produitId': item['produitId'],
+                            'produitNom': item['produitNom'],
+                            'quantite': item['quantite'],
+                            'type': 'sale',
+                            'raison': numero, // numéro de facture comme raison
+                            'date': DateTime.now().millisecondsSinceEpoch,
+                            'utilisateur': vendeurNom ?? 'Non spécifié',
+                          });
+                        }
 
                         if (montantPaye > 0) {
                           await txn.insert('paiements', {
@@ -676,6 +693,11 @@ class FactureDialog {
     }
   }
 
+  static Future<String?> _getLogoPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('logo_path');
+  }
+
   static Widget _buildPrintableFacture({
     required String? clientNom,
     required String? adresse,
@@ -687,164 +709,178 @@ class FactureDialog {
     required double total,
     required double montantPaye,
     required double resteAPayer,
-    required double? montantRemis,
-    required double? monnaie,
+    double? montantRemis,
+    double? monnaie,
     required String numero,
     required DateTime date,
   }) {
     final formatter = NumberFormat('#,##0.00', 'fr_FR');
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black, width: 2.0),
-        borderRadius: BorderRadius.circular(8.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
+    return FutureBuilder<String?>(
+      future: _getLogoPath(),
+      builder: (context, snapshot) {
+        Widget logoWidget = Container(
+          height: 60,
+          width: 120,
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey),
+            borderRadius: BorderRadius.circular(4.0),
+          ),
+          child: const Center(child: Text('Logo', style: TextStyle(color: Colors.grey))),
+        );
+        if (snapshot.hasData && snapshot.data != null && File(snapshot.data!).existsSync()) {
+          logoWidget = Image.file(
+            File(snapshot.data!),
             height: 60,
             width: 120,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(4.0),
-            ),
-            child: const Center(child: Text('Logo', style: TextStyle(color: Colors.grey))),
+            fit: BoxFit.contain,
+          );
+        }
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24.0),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border.all(color: Colors.black, width: 2.0),
+            borderRadius: BorderRadius.circular(8.0),
           ),
-          const SizedBox(height: 16.0),
-          const Center(child: Text('FACTURE', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold))),
-          const SizedBox(height: 24.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Adresse Fournisseur:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text(magasinAdresse ?? 'Non spécifié', overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 16.0),
-                    Text('Numéro: $numero', overflow: TextOverflow.ellipsis),
-                    Text('Date: ${date.toString().substring(0, 10)}', overflow: TextOverflow.ellipsis),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text('Client:', style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text(clientNom ?? '............................', overflow: TextOverflow.ellipsis),
-                    Text(adresse ?? 'Non spécifiée', overflow: TextOverflow.ellipsis),
-                    const SizedBox(height: 16.0),
-                    Text('Vendeur: $vendeurNom', overflow: TextOverflow.ellipsis),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24.0),
-          const Text('Articles:', style: TextStyle(fontWeight: FontWeight.bold)),
-          Table(
-            border: TableBorder.all(color: Colors.black),
-            columnWidths: const {
-              0: FlexColumnWidth(3),
-              1: FlexColumnWidth(1),
-              2: FlexColumnWidth(1),
-              3: FlexColumnWidth(1),
-            },
-            children: [
-              TableRow(
-                decoration: BoxDecoration(color: Colors.grey.shade200),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text('Description', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text('Qté', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text('Prix Unitaire', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
-                  ),
-                ],
-              ),
-              ...items.map((item) {
-                final quantite = (item['quantite'] as num?)?.toInt() ?? 0;
-                final prixUnitaire = (item['prixUnitaire'] as num?)?.toDouble() ?? 0.0;
-                return TableRow(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('${item['produitNom']} (${item['unite']})', overflow: TextOverflow.ellipsis),
-                    ),
-                    Padding(padding: const EdgeInsets.all(8.0), child: Text('$quantite')),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('${formatter.format(prixUnitaire)} FCFA', overflow: TextOverflow.ellipsis),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('${formatter.format(quantite * prixUnitaire)} FCFA', overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
-                );
-              }),
-            ],
-          ),
-          const SizedBox(height: 24.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text('Sous-total: ${formatter.format(sousTotal)} FCFA', overflow: TextOverflow.ellipsis),
-                  Text('Ristourne: ${formatter.format(ristourne)} FCFA', overflow: TextOverflow.ellipsis),
-                  Text('Total: ${formatter.format(total)} FCFA',
-                      style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
-                  Text('Payé: ${formatter.format(montantPaye)} FCFA', overflow: TextOverflow.ellipsis),
-                  if (montantRemis != null)
-                    Text('Montant remis: ${formatter.format(montantRemis)} FCFA', overflow: TextOverflow.ellipsis),
-                  if (monnaie != null && monnaie > 0)
-                    Text('Monnaie: ${formatter.format(monnaie)} FCFA', overflow: TextOverflow.ellipsis),
-                  Text('Reste à payer: ${formatter.format(resteAPayer >= 0 ? resteAPayer : 0)} FCFA',
-                      overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 32.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
+              logoWidget,
+              const SizedBox(height: 16.0),
+              const Center(child: Text('FACTURE', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold))),
+              const SizedBox(height: 24.0),
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Signature du Client', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 8.0),
-                  Container(width: 200, child: CustomPaint(painter: DottedLinePainter(), size: Size(200, 2))),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Adresse Fournisseur:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(magasinAdresse ?? 'Non spécifié', overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 16.0),
+                        Text('Numéro: $numero', overflow: TextOverflow.ellipsis),
+                        Text('Date: ${DateFormat('dd/MM/yyyy').format(date)} à ${DateFormat('HH:mm').format(date)}', overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        const Text('Client:', style: TextStyle(fontWeight: FontWeight.bold)),
+                        Text(clientNom ?? '............................', overflow: TextOverflow.ellipsis),
+                        Text(adresse ?? 'Non spécifiée', overflow: TextOverflow.ellipsis),
+                        const SizedBox(height: 16.0),
+                        Text('Vendeur: $vendeurNom', overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-              Row(
+              const SizedBox(height: 24.0),
+              const Text('Articles:', style: TextStyle(fontWeight: FontWeight.bold)),
+              Table(
+                border: TableBorder.all(color: Colors.black),
+                columnWidths: const {
+                  0: FlexColumnWidth(3),
+                  1: FlexColumnWidth(1),
+                  2: FlexColumnWidth(1),
+                  3: FlexColumnWidth(1),
+                },
                 children: [
-                  const Text('Signature du Vendeur', style: TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(width: 8.0),
-                  Container(width: 200, child: CustomPaint(painter: DottedLinePainter(), size: Size(200, 2))),
+                  TableRow(
+                    decoration: BoxDecoration(color: Colors.grey.shade200),
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text('Description', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text('Qté', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text('Prix Unitaire', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.all(8.0),
+                        child: Text('Total', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                  ...items.map((item) {
+                    final quantite = (item['quantite'] as num?)?.toInt() ?? 0;
+                    final prixUnitaire = (item['prixUnitaire'] as num?)?.toDouble() ?? 0.0;
+                    return TableRow(
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Text('${item['produitNom']} (${item['unite']})', overflow: TextOverflow.ellipsis),
+                        ),
+                        Padding(padding: const EdgeInsets.all(8.0), child: Text('$quantite')),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Text('${formatter.format(prixUnitaire)} FCFA', overflow: TextOverflow.ellipsis),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.all(8.0),
+                          child: Text('${formatter.format(quantite * prixUnitaire)} FCFA', overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+              const SizedBox(height: 24.0),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Text('Sous-total: ${formatter.format(sousTotal)} FCFA', overflow: TextOverflow.ellipsis),
+                      Text('Ristourne: ${formatter.format(ristourne)} FCFA', overflow: TextOverflow.ellipsis),
+                      Text('Total: ${formatter.format(total)} FCFA',
+                          style: TextStyle(fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                      Text('Payé: ${formatter.format(montantPaye)} FCFA', overflow: TextOverflow.ellipsis),
+                      if (montantRemis != null)
+                        Text('Montant remis: ${formatter.format(montantRemis)} FCFA', overflow: TextOverflow.ellipsis),
+                      if (monnaie != null && monnaie > 0)
+                        Text('Monnaie: ${formatter.format(monnaie)} FCFA', overflow: TextOverflow.ellipsis),
+                      Text('Reste à payer: ${formatter.format(resteAPayer >= 0 ? resteAPayer : 0)} FCFA',
+                          overflow: TextOverflow.ellipsis),
+                    ],
+                  ),
+                ],
+              ),
+              const SizedBox(height: 32.0),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      const Text('Signature du Client', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 8.0),
+                      Container(width: 200, child: CustomPaint(painter: DottedLinePainter(), size: Size(200, 2))),
+                    ],
+                  ),
+                  Row(
+                    children: [
+                      const Text('Signature du Vendeur', style: TextStyle(fontWeight: FontWeight.bold)),
+                      const SizedBox(width: 8.0),
+                      Container(width: 200, child: CustomPaint(painter: DottedLinePainter(), size: Size(200, 2))),
+                    ],
+                  ),
                 ],
               ),
             ],
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

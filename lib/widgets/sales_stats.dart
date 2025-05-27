@@ -87,16 +87,25 @@ class SalesStats extends StatelessWidget {
                       child: Text('Aucune vente de produit pour cette période'),
                     );
                   }
-                  return Column(
-                    children: products.map((product) {
-                      final quantite = (product['totalQuantite'] as num?)?.toInt() ?? 0;
-                      final ca = (product['totalCA'] as num?)?.toDouble() ?? 0.0;
-                      return ListTile(
-                        title: Text(product['nom']),
-                        subtitle: Text('$quantite ${product['unite']} vendu(s)'),
-                        trailing: Text('${formatter.format(ca)} FCFA'),
-                      );
-                    }).toList(),
+                  return Scrollbar(
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    notificationPredicate: (notif) => notif.metrics.axis == Axis.horizontal,
+                    controller: ScrollController(),
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Column(
+                        children: products.map((product) {
+                          final quantite = (product['totalQuantite'] as num?)?.toInt() ?? 0;
+                          final ca = (product['totalCA'] as num?)?.toDouble() ?? 0.0;
+                          return ListTile(
+                            title: Text(product['nom']),
+                            subtitle: Text('$quantite ${product['unite']} vendu(s)'),
+                            trailing: Text('${formatter.format(ca)} FCFA'),
+                          );
+                        }).toList(),
+                      ),
+                    ),
                   );
                 },
               ),
