@@ -33,6 +33,135 @@ class FactureDialog {
       }
 
       final formatter = NumberFormat('#,##0.00', 'fr_FR');
+      Widget _detailRow(String label, String value, ThemeData theme) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label, style: const TextStyle(color: Colors.grey)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  value,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
+        );
+      }
+      void _showEnlargedImage(BuildContext ctx, String? imageUrl) {
+        final isDarkMode = Theme.of(ctx).brightness == Brightness.dark;
+        showDialog(
+          context: ctx,
+          builder: (context) => Dialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              constraints: const BoxConstraints(maxWidth: 320, maxHeight: 380),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Expanded(
+                    child: (imageUrl != null && File(imageUrl).existsSync())
+                        ? Image.file(
+                            File(imageUrl),
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stack) => const Icon(
+                              Icons.image_not_supported,
+                              size: 100,
+                              color: Colors.grey,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.image_not_supported,
+                            size: 100,
+                            color: Colors.grey,
+                          ),
+                  ),
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text(
+                      'Fermer',
+                      style: TextStyle(
+                        color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+      void _showProductDetails(BuildContext ctx, Produit produit) {
+        final theme = Theme.of(ctx);
+        final currency = NumberFormat('#,##0.00', 'fr_FR');
+        showDialog(
+          context: ctx,
+          barrierDismissible: true,
+          builder: (dCtx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+            contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            title: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.blue.shade50),
+                  clipBehavior: Clip.antiAlias,
+                  child: (produit.imageUrl != null && produit.imageUrl!.isNotEmpty && File(produit.imageUrl!).existsSync())
+                      ? Image.file(File(produit.imageUrl!), fit: BoxFit.cover)
+                      : Icon(Icons.inventory_2_outlined, color: Colors.blue.shade600),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(produit.nom, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 8),
+                _detailRow('Catégorie', produit.categorie, theme),
+                if (produit.marque != null && produit.marque!.isNotEmpty) _detailRow('Marque', produit.marque!, theme),
+                if (produit.sku != null && produit.sku!.isNotEmpty) _detailRow('SKU', produit.sku!, theme),
+                if (produit.codeBarres != null && produit.codeBarres!.isNotEmpty) _detailRow('Code-barres', produit.codeBarres!, theme),
+                _detailRow('Unité', produit.unite, theme),
+                _detailRow('Stock', '${produit.quantiteStock}', theme),
+                _detailRow('Prix vente', '${currency.format(produit.prixVente)} FCFA', theme),
+                if (produit.prixVenteGros > 0) _detailRow('Prix gros', '${currency.format(produit.prixVenteGros)} FCFA', theme),
+                if (produit.description != null && produit.description!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text('Description', style: theme.textTheme.labelLarge),
+                  const SizedBox(height: 4),
+                  Text(produit.description!),
+                ],
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showEnlargedImage(ctx, produit.imageUrl),
+                    icon: const Icon(Icons.zoom_in),
+                    label: const Text('Voir l\'image'),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Fermer')),
+            ],
+          ),
+        );
+      }
       final selectedItems = <Map<String, dynamic>>[];
       final quantiteControllers = <int, TextEditingController>{};
       final insuffisant = <int, bool>{};
@@ -279,6 +408,7 @@ class FactureDialog {
                                               },
                                             ),
                                           ),
+                                          onTap: () => _showProductDetails(context, produit),
                                         ),
                                       );
                                     }),

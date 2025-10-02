@@ -44,11 +44,9 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
   void initState() {
     super.initState();
     _facturesFuture = Future.value([]);
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    _currentUser = user;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
-      setState(() {
-        _currentUser = user;
-      });
       _initDatabase().then((_) {
         setState(() {
           _facturesFuture = DatabaseHelper.getFactures(
@@ -841,7 +839,8 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
           ),
           IconButton(
             icon: const Icon(Icons.print),
-            onPressed: () {
+            tooltip: 'Exporter les statistiques en PDF',
+            onPressed: (_currentUser?.role == 'Vendeur') ? null : () {
               _generateAndPrintPdf();
             },
           ),
@@ -1517,9 +1516,11 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
                       style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
                     ),
                     IconButton(
-                      icon: Icon(Icons.print, color: theme.primaryColor),
-                      onPressed: _generateAndPrintPdf,
-                      tooltip: 'Exporter les statistiques en PDF',
+                      icon: Icon(Icons.print, color: (_currentUser?.role == 'Vendeur') ? theme.disabledColor : theme.primaryColor),
+                      onPressed: (_currentUser?.role == 'Vendeur') ? null : _generateAndPrintPdf,
+                      tooltip: (_currentUser?.role == 'Vendeur')
+                          ? 'Export désactivé pour les vendeurs'
+                          : 'Exporter les statistiques en PDF',
                     ),
                   ],
                 ),

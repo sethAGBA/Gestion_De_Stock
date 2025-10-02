@@ -35,9 +35,9 @@ class _SidebarWidgetState extends State<SidebarWidget> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(
-              isVerySmallScreen || !_isExpanded ? 8.0 : 16.0,
+              isVerySmallScreen || !_isExpanded ? 8.0 : 12.0,
               24.0,
-              isVerySmallScreen || !_isExpanded ? 8.0 : 16.0,
+              isVerySmallScreen || !_isExpanded ? 8.0 : 12.0,
               32.0,
             ),
             child: Row(
@@ -49,13 +49,18 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                   size: isVerySmallScreen || !_isExpanded ? 24.0 : 28.0,
                 ),
                 if (!isVerySmallScreen && _isExpanded) ...[
-                  const SizedBox(width: 12.0),
-                  const Text(
-                    'GESTION DE STOCK',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18.0,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(width: 8.0),
+                  const Expanded(
+                    child: Text(
+                      'GESTION DE STOCK',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18.0,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -128,6 +133,8 @@ class _SidebarWidgetState extends State<SidebarWidget> {
           icon,
           color: enabled ? Colors.white : Colors.white.withOpacity(0.4),
         ),
+        minLeadingWidth: isExpanded ? 40.0 : 0.0,
+        contentPadding: EdgeInsets.symmetric(horizontal: isExpanded ? 16.0 : 8.0),
         title: isExpanded
             ? Text(
                 title,

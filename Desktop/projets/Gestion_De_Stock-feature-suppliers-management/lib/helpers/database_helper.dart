@@ -1224,6 +1224,292 @@ class DatabaseHelper {
     }
   }
 
+  // Nouvelles méthodes pour le tableau de bord des ventes
+  static Future<double> getTotalSalesToday() async {
+    final db = await database;
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE date >= ? AND date < ? AND statut = 'Active'
+      ''', [startOfDay.millisecondsSinceEpoch, endOfDay.millisecondsSinceEpoch]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes du jour : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<int> getPaidInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'Payé' AND statut = 'Active'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures payées : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getPendingInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'En attente' AND statut = 'Active'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures en attente : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getCancelledInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statut = 'Annulée'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures annulées : $e');
+      return 0;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getTopSellingProducts({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM bon_commande_items bci
+        JOIN produits p ON bci.produitId = p.id
+        JOIN factures f ON bci.bonCommandeId = f.bonCommandeId
+        WHERE f.statut != 'Annulée'
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite DESC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits les plus vendus : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getLeastSellingProducts({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM produits p
+        LEFT JOIN bon_commande_items bci ON p.id = bci.produitId
+        LEFT JOIN factures f ON bci.bonCommandeId = f.bonCommandeId AND f.statut != 'Annulée'
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite ASC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits les moins vendus : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getTopClients({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          COALESCE(f.clientNom, 'Client anonyme') as clientNom,
+          COUNT(*) as factureCount,
+          COALESCE(SUM(f.total), 0) as totalCA
+        FROM factures f
+        WHERE f.statut = 'Active'
+        GROUP BY f.clientNom
+        ORDER BY totalCA DESC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'clientNom': row['clientNom'] ?? 'Client anonyme',
+        'factureCount': (row['factureCount'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des meilleurs clients : $e');
+      return [];
+    }
+  }
+
+  // Méthodes spécifiques au vendeur
+  static Future<double> getVendorSalesToday(String vendorName) async {
+    final db = await database;
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE date >= ? AND date < ? AND statut = 'Active' AND vendeurNom = ?
+      ''', [startOfDay.millisecondsSinceEpoch, endOfDay.millisecondsSinceEpoch, vendorName]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes du vendeur aujourd\'hui : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<double> getVendorTotalSales(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération du total des ventes du vendeur : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<int> getVendorInvoicesCount(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération du nombre de factures du vendeur : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getVendorPaidInvoicesCount(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'Payé' AND statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures payées du vendeur : $e');
+      return 0;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getVendorTopProducts(String vendorName, {int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM bon_commande_items bci
+        JOIN produits p ON bci.produitId = p.id
+        JOIN factures f ON bci.bonCommandeId = f.bonCommandeId
+        WHERE f.statut != 'Annulée' AND f.vendeurNom = ?
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite DESC
+        LIMIT ?
+      ''', [vendorName, limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits du vendeur : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getVendorTopClients(String vendorName, {int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          COALESCE(f.clientNom, 'Client anonyme') as clientNom,
+          COUNT(*) as factureCount,
+          COALESCE(SUM(f.total), 0) as totalCA
+        FROM factures f
+        WHERE f.statut = 'Active' AND f.vendeurNom = ?
+        GROUP BY f.clientNom
+        ORDER BY totalCA DESC
+        LIMIT ?
+      ''', [vendorName, limit]);
+      
+      return result.map((row) => {
+        'clientNom': row['clientNom'] ?? 'Client anonyme',
+        'factureCount': (row['factureCount'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des clients du vendeur : $e');
+      return [];
+    }
+  }
+
   static Future<void> cancelFacture(int factureId, String motif) async {
     final db = await database;
     try {

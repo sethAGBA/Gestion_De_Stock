@@ -195,6 +195,100 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
     );
   }
 
+  void _showProductDetails(BuildContext ctx, Produit produit) {
+    final theme = Theme.of(ctx);
+    final isDarkMode = theme.brightness == Brightness.dark;
+    final currency = NumberFormat('#,##0.00', 'fr_FR');
+    showDialog(
+      context: ctx,
+      barrierDismissible: true,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+        contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+        title: Row(
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.blue.shade50),
+              clipBehavior: Clip.antiAlias,
+              child: (produit.imageUrl != null && produit.imageUrl!.isNotEmpty && File(produit.imageUrl!).existsSync())
+                  ? Image.file(File(produit.imageUrl!), fit: BoxFit.cover)
+                  : Icon(Icons.inventory_2_outlined, color: Colors.blue.shade600),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                produit.nom,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            _detailRow('Catégorie', produit.categorie),
+            if (produit.marque != null && produit.marque!.isNotEmpty) _detailRow('Marque', produit.marque!),
+            if (produit.sku != null && produit.sku!.isNotEmpty) _detailRow('SKU', produit.sku!),
+            if (produit.codeBarres != null && produit.codeBarres!.isNotEmpty) _detailRow('Code-barres', produit.codeBarres!),
+            _detailRow('Unité', produit.unite),
+            _detailRow('Stock', '${produit.quantiteStock}'),
+            _detailRow('Prix vente', '${currency.format(produit.prixVente)} FCFA'),
+            if (produit.prixVenteGros > 0) _detailRow('Prix gros', '${currency.format(produit.prixVenteGros)} FCFA'),
+            if (produit.description != null && produit.description!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text('Description', style: theme.textTheme.labelLarge),
+              const SizedBox(height: 4),
+              Text(produit.description!),
+            ],
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: () => _showEnlargedImage(ctx, produit.imageUrl),
+                icon: const Icon(Icons.zoom_in),
+                label: Text(
+                  'Voir l\'image',
+                  style: TextStyle(color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700),
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
+        ],
+      ),
+    );
+  }
+
+  Widget _detailRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.grey)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildInsightPill({
     required ThemeData theme,
     required bool isDarkMode,
@@ -320,6 +414,7 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
           final displayStatus = _getDisplayStatus(produit);
 
           return DataRow(
+            onSelectChanged: (_) => _showProductDetails(context, produit),
             color: WidgetStatePropertyAll<Color>(_getStockColor(produit)),
             cells: [
               DataCell(Text((index + 1).toString())),
@@ -469,6 +564,7 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
         }).toList();
 
     final dataTable = DataTable(
+      showCheckboxColumn: false,
       columnSpacing: 40,
       horizontalMargin: 28,
       dividerThickness: 0.6,
