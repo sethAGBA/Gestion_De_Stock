@@ -32,7 +32,7 @@ class DatabaseHelper {
     print('Initialisation de la base de données à : $pathDb');
     return await openDatabase(
       pathDb,
-      version: 20,
+      version: 22,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
@@ -77,6 +77,8 @@ class DatabaseHelper {
         variantes TEXT,
         prixAchat REAL NOT NULL DEFAULT 0.0,
         prixVente REAL NOT NULL DEFAULT 0.0,
+        prixVenteGros REAL NOT NULL DEFAULT 0.0,
+        seuilGros REAL NOT NULL DEFAULT 0.0,
         tva REAL NOT NULL DEFAULT 0.0,
         fournisseurPrincipal TEXT,
         fournisseursSecondaires TEXT,
@@ -148,6 +150,7 @@ class DatabaseHelper {
         produitId INTEGER NOT NULL,
         quantite REAL NOT NULL,
         prixUnitaire REAL NOT NULL,
+        tarifMode TEXT,
         FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
@@ -636,6 +639,25 @@ class DatabaseHelper {
       if (!userColumnNames.contains('otpSecret')) {
         await db.execute('ALTER TABLE users ADD COLUMN otpSecret TEXT');
         print('Colonne otpSecret ajoutée à users');
+      }
+    }
+    if (oldVersion < 21) {
+      print('Migration vers version 21 : ajout prixVenteGros/seuilGros dans produits');
+      final columns = await db.rawQuery('PRAGMA table_info(produits)');
+      final names = columns.map((c) => c['name'] as String).toList();
+      if (!names.contains('prixVenteGros')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN prixVenteGros REAL NOT NULL DEFAULT 0.0');
+      }
+      if (!names.contains('seuilGros')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN seuilGros REAL NOT NULL DEFAULT 0.0');
+      }
+    }
+    if (oldVersion < 22) {
+      print('Migration vers version 22 : ajout tarifMode dans bon_commande_items');
+      final cols = await db.rawQuery('PRAGMA table_info(bon_commande_items)');
+      final names = cols.map((c) => c['name'] as String).toList();
+      if (!names.contains('tarifMode')) {
+        await db.execute('ALTER TABLE bon_commande_items ADD COLUMN tarifMode TEXT');
       }
     }
     if (oldVersion < 20) {

@@ -194,16 +194,23 @@ class PdfService {
                       ],
                     ),
                     ...items.map((item) {
-                      final quantite = (item['quantite'] is num ? item['quantite'] as num : num.tryParse(item['quantite'].toString()))?.toInt() ?? 0;
+                      final quantiteNum = (item['quantite'] is num ? item['quantite'] as num : num.tryParse(item['quantite'].toString()))?.toDouble() ?? 0.0;
                       final prixUnitaire = (item['prixUnitaire'] is num ? item['prixUnitaire'] as num : num.tryParse(item['prixUnitaire'].toString()))?.toDouble() ?? 0.0;
                       final produitNom = (item['produitNom']?.toString() ?? 'N/A').substring(0, (item['produitNom']?.toString().length ?? 0) > 50 ? 50 : null);
-                      final unite = (item['unite']?.toString() ?? 'N/A').substring(0, (item['unite']?.toString().length ?? 0) > 10 ? 10 : null);
+                      final uniteFull = (item['unite']?.toString() ?? 'N/A');
+                      final unite = uniteFull.substring(0, uniteFull.length > 10 ? 10 : uniteFull.length);
+                      final mode = (item['tarifMode']?.toString() ?? 'Détail');
+                      final allowDecimal = {
+                        'kg', 'kilogramme', 'kilogrammes', 'litre', 'litres', 'l', 'liter'
+                      }.contains(uniteFull.toLowerCase());
+                      final qtyFormatter = NumberFormat(allowDecimal ? '#,##0.###' : '#,##0', 'fr_FR');
+                      final quantite = qtyFormatter.format(allowDecimal ? quantiteNum : quantiteNum.round());
                       return pw.TableRow(
                         children: [
                           pw.Padding(
                             padding: const pw.EdgeInsets.all(6),
                             child: pw.Text(
-                              '$produitNom ($unite)',
+                              '$produitNom ($unite) - $mode',
                               style: pw.TextStyle(font: times, fontSize: 8),
                             ),
                           ),
@@ -224,7 +231,7 @@ class PdfService {
                           pw.Padding(
                             padding: const pw.EdgeInsets.all(6),
                             child: pw.Text(
-                              '${formatter.format(quantite * prixUnitaire)}\u00A0FCFA',
+                              '${formatter.format(quantiteNum * prixUnitaire)}\u00A0FCFA',
                               style: pw.TextStyle(font: times, fontSize: 8),
                             ),
                           ),

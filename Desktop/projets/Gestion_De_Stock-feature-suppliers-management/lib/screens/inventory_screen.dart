@@ -164,7 +164,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     try {
       _database = await openDatabase(
         path.join(await getDatabasesPath(), 'dashboard.db'),
-        version: 8,
+        version: 9,
         onCreate: (db, version) async {
           print('Création des tables...');
           await db.transaction((txn) async {
@@ -188,6 +188,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 variantes TEXT,
                 prixAchat REAL NOT NULL DEFAULT 0.0,
                 prixVente REAL NOT NULL DEFAULT 0.0,
+                prixVenteGros REAL NOT NULL DEFAULT 0.0,
+                seuilGros REAL NOT NULL DEFAULT 0.0,
                 tva REAL NOT NULL DEFAULT 0.0,
                 fournisseurPrincipal TEXT,
                 fournisseursSecondaires TEXT,
@@ -262,6 +264,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 produitId INTEGER NOT NULL,
                 quantite INTEGER NOT NULL,
                 prixUnitaire REAL NOT NULL,
+                tarifMode TEXT,
                 FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
                 FOREIGN KEY (produitId) REFERENCES produits(id)
               )
@@ -356,9 +359,9 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   fournisseursSecondaires TEXT,
                   derniereEntree INTEGER,
                   derniereSortie INTEGER,
-                  statut TEXT NOT NULL
-                )
-              ''');
+                statut TEXT NOT NULL
+              )
+            ''');
               await txn.execute('''
                 INSERT INTO produits_new (
                   nom, description, categorie, marque, imageUrl, sku, codeBarres, unite,
@@ -375,6 +378,23 @@ class _InventoryScreenState extends State<InventoryScreen> {
               ''');
               await txn.execute('DROP TABLE produits');
               await txn.execute('ALTER TABLE produits_new RENAME TO produits');
+            }
+            if (oldVersion < 9) {
+              final columns = await db.rawQuery('PRAGMA table_info(produits)');
+              final names = columns.map((c) => c['name'] as String).toList();
+              if (!names.contains('prixVenteGros')) {
+                await txn.execute('ALTER TABLE produits ADD COLUMN prixVenteGros REAL NOT NULL DEFAULT 0.0');
+              }
+              if (!names.contains('seuilGros')) {
+                await txn.execute('ALTER TABLE produits ADD COLUMN seuilGros REAL NOT NULL DEFAULT 0.0');
+              }
+            }
+            if (oldVersion < 10) {
+              final cols = await db.rawQuery('PRAGMA table_info(bon_commande_items)');
+              final names = cols.map((c) => c['name'] as String).toList();
+              if (!names.contains('tarifMode')) {
+                await txn.execute('ALTER TABLE bon_commande_items ADD COLUMN tarifMode TEXT');
+              }
             }
             if (oldVersion < 5) {
               print(
@@ -1555,6 +1575,30 @@ class _InventoryScreenState extends State<InventoryScreen> {
 
     return Scaffold(
       backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(
+        elevation: 0,
+        backgroundColor: theme.scaffoldBackgroundColor,
+        title: const Text(''),
+        actions: [
+          ElevatedButton.icon(
+            onPressed: _isLoading ? null : _refreshProducts,
+            style: ElevatedButton.styleFrom(
+              foregroundColor: Colors.white,
+              backgroundColor: Colors.teal.shade600,
+              padding: const EdgeInsets.symmetric(
+                vertical: 8,
+                horizontal: 12,
+              ),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            icon: const Icon(Icons.refresh_rounded),
+            label: const Text('Actualiser'),
+          ),
+          const SizedBox(width: 16),
+        ],
+      ),
       body: SafeArea(
         child: Padding(
           // removed outer padding so the table card can extend to the page edges
@@ -1624,22 +1668,6 @@ class _InventoryScreenState extends State<InventoryScreen> {
                           ),
                           icon: const Icon(Icons.list_alt_rounded),
                           label: const Text('Inventaire global/partiel'),
-                        ),
-                        ElevatedButton.icon(
-                          onPressed: _isLoading ? null : _refreshProducts,
-                          style: ElevatedButton.styleFrom(
-                            foregroundColor: Colors.white,
-                            backgroundColor: Colors.teal.shade600,
-                            padding: const EdgeInsets.symmetric(
-                              vertical: 12,
-                              horizontal: 16,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Actualiser'),
                         ),
                       ],
                     ),
@@ -2115,20 +2143,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                                                                 _getDisplayStatus(
                                                                   produit,
                                                                 );
-                                                            final stockValue = (produit
-                                                                        .quantiteStock *
-                                                                    produit
-                                                                        .prixVente)
-                                                                .toStringAsFixed(
-                                                                  2,
-                                                                );
-                                                            final soldValue =
-                                                                (soldStockValues[produit
-                                                                            .id]?['valeurVendue'] ??
-                                                                        0.0)
-                                                                    .toStringAsFixed(
-                                                                      2,
-                                                                    );
+                                                            final stockValue = (produit.quantiteStock * produit.prixVente);
+                                                            final soldValue = (soldStockValues[produit.id]?['valeurVendue'] ?? 0.0) as num;
                                                             final ecart =
                                                                 produit
                                                                     .quantiteStock -

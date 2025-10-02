@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'helpers/database_helper.dart';
 import 'providers/auth_provider.dart';
 import 'screens/dashboard_screen.dart';
@@ -12,6 +13,11 @@ import 'screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Initialize sqflite FFI on desktop (Windows/Linux/Mac)
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
   await windowManager.ensureInitialized();
   // Initialize French locale data for intl
   await initializeDateFormatting('fr_FR', null);

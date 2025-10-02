@@ -77,7 +77,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
     try {
       _database = await openDatabase(
         path.join(await getDatabasesPath(), 'dashboard.db'),
-        version: 7, // Incremented to force migration
+        version: 8, // Bump for prixVenteGros/seuilGros
         onCreate: (db, version) async {
           print('Création des tables...');
           await db.transaction((txn) async {
@@ -100,6 +100,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 variantes TEXT,
                 prixAchat REAL NOT NULL DEFAULT 0.0,
                 prixVente REAL NOT NULL DEFAULT 0.0,
+                prixVenteGros REAL NOT NULL DEFAULT 0.0,
+                seuilGros REAL NOT NULL DEFAULT 0.0,
                 tva REAL NOT NULL DEFAULT 0.0,
                 fournisseurPrincipal TEXT,
                 fournisseursSecondaires TEXT,
@@ -173,6 +175,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
                 produitId INTEGER NOT NULL,
                 quantite INTEGER NOT NULL,
                 prixUnitaire REAL NOT NULL,
+                tarifMode TEXT,
                 FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
                 FOREIGN KEY (produitId) REFERENCES produits(id)
               )
@@ -328,6 +331,23 @@ class _ProductsScreenState extends State<ProductsScreen> {
               ''');
               await txn.execute('DROP TABLE historique_avaries');
               await txn.execute('ALTER TABLE historique_avaries_new RENAME TO historique_avaries');
+            }
+            if (oldVersion < 8) {
+              final columns = await db.rawQuery('PRAGMA table_info(produits)');
+              final names = columns.map((c) => c['name'] as String).toList();
+              if (!names.contains('prixVenteGros')) {
+                await txn.execute('ALTER TABLE produits ADD COLUMN prixVenteGros REAL NOT NULL DEFAULT 0.0');
+              }
+              if (!names.contains('seuilGros')) {
+                await txn.execute('ALTER TABLE produits ADD COLUMN seuilGros REAL NOT NULL DEFAULT 0.0');
+              }
+            }
+            if (oldVersion < 9) {
+              final cols = await db.rawQuery('PRAGMA table_info(bon_commande_items)');
+              final names = cols.map((c) => c['name'] as String).toList();
+              if (!names.contains('tarifMode')) {
+                await txn.execute('ALTER TABLE bon_commande_items ADD COLUMN tarifMode TEXT');
+              }
             }
             if (oldVersion < 5) {
               print('Migration vers version 5 : ajout des tables pour facturation');

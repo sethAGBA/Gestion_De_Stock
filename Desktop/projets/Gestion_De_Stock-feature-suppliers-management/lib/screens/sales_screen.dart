@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -225,6 +226,26 @@ class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStat
         title: const Text('Exporter le PDF'),
         content: const Text('Que souhaitez-vous faire avec le PDF généré ?'),
         actions: [
+          TextButton(
+            onPressed: () async {
+              try {
+                await Printing.layoutPdf(
+                  onLayout: (_) => Uint8List.fromList(pdfBytes),
+                  name: 'Statistiques des ventes',
+                );
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Aperçu PDF des statistiques ouvert')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Erreur lors de l\'ouverture du PDF : $e')),
+                );
+              }
+            },
+            child: const Text('Voir PDF'),
+          ),
           TextButton(
             onPressed: () async {
               final directoryPath = await _pickSaveDirectory();

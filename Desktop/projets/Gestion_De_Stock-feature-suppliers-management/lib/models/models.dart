@@ -35,6 +35,8 @@ class Produit {
   final List<Variante> variantes;
   final double prixAchat;
   final double prixVente;
+  final double prixVenteGros;
+  final double seuilGros;
   final double tva;
   final String? fournisseurPrincipal;
   final List<String> fournisseursSecondaires;
@@ -61,6 +63,8 @@ class Produit {
     required this.variantes,
     required this.prixAchat,
     required this.prixVente,
+    this.prixVenteGros = 0.0,
+    this.seuilGros = 0.0,
     required this.tva,
     this.fournisseurPrincipal,
     required this.fournisseursSecondaires,
@@ -89,6 +93,8 @@ class Produit {
       'variantes': jsonEncode(variantes.map((v) => v.toMap()).toList()),
       'prixAchat': prixAchat,
       'prixVente': prixVente,
+      'prixVenteGros': prixVenteGros,
+      'seuilGros': seuilGros,
       'tva': tva,
       'fournisseurPrincipal': fournisseurPrincipal,
       'fournisseursSecondaires': jsonEncode(fournisseursSecondaires),
@@ -120,6 +126,8 @@ class Produit {
           .toList(),
       prixAchat: (map['prixAchat'] as num?)?.toDouble() ?? 0.0,
       prixVente: (map['prixVente'] as num?)?.toDouble() ?? 0.0,
+      prixVenteGros: (map['prixVenteGros'] as num?)?.toDouble() ?? 0.0,
+      seuilGros: (map['seuilGros'] as num?)?.toDouble() ?? 0.0,
       tva: (map['tva'] as num?)?.toDouble() ?? 0.0,
       fournisseurPrincipal: map['fournisseurPrincipal'] as String?,
       fournisseursSecondaires: List<String>.from(jsonDecode(map['fournisseursSecondaires'] as String? ?? '[]')),

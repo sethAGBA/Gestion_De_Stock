@@ -50,6 +50,8 @@ class _ProductDialogState extends State<ProductDialog> {
   List<Variante> _variantes = [];
   double _prixAchat = 0.0;
   double _prixVente = 0.0;
+  double _prixVenteGros = 0.0;
+  double _seuilGros = 0.0;
   double _tva = 0.0;
   String? _fournisseurPrincipal;
   List<String> _fournisseursSecondaires = [];
@@ -115,6 +117,8 @@ class _ProductDialogState extends State<ProductDialog> {
       _variantes = widget.produit!.variantes;
       _prixAchat = widget.produit!.prixAchat;
       _prixVente = widget.produit!.prixVente;
+      _prixVenteGros = widget.produit!.prixVenteGros;
+      _seuilGros = widget.produit!.seuilGros;
       _tva = widget.produit!.tva;
       _fournisseurPrincipal = widget.produit!.fournisseurPrincipal;
       _fournisseursSecondaires = widget.produit!.fournisseursSecondaires;
@@ -187,6 +191,8 @@ class _ProductDialogState extends State<ProductDialog> {
         variantes: _variantes,
         prixAchat: _prixAchat,
         prixVente: _prixVente,
+        prixVenteGros: _prixVenteGros,
+        seuilGros: _seuilGros,
         tva: _tva,
         fournisseurPrincipal: _fournisseurPrincipal,
         fournisseursSecondaires: _fournisseursSecondaires,
@@ -282,6 +288,8 @@ class _ProductDialogState extends State<ProductDialog> {
         variantes: _variantes,
         prixAchat: _prixAchat,
         prixVente: _prixVente,
+        prixVenteGros: _prixVenteGros,
+        seuilGros: _seuilGros,
         tva: _tva,
         fournisseurPrincipal: _fournisseurPrincipal,
         fournisseursSecondaires: _fournisseursSecondaires,
@@ -743,6 +751,58 @@ class _ProductDialogState extends State<ProductDialog> {
                                 return null;
                               },
                               onSaved: (value) => _quantiteStock = _parseDoubleLocale(value) ?? 0.0,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _prixVenteGros.toString(),
+                              decoration: const InputDecoration(labelText: 'Prix de gros', border: OutlineInputBorder()),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\\s-]')),
+                              ],
+                              validator: (value) {
+                                if (value != null && value.isNotEmpty) {
+                                  final num = _parseDoubleLocale(value);
+                                  if (num == null) {
+                                    return 'Doit être un nombre valide';
+                                  }
+                                  if (num < 0) {
+                                    return 'Ne peut pas être négatif';
+                                  }
+                                }
+                                return null;
+                              },
+                              onSaved: (value) => _prixVenteGros = _parseDoubleLocale(value) ?? 0.0,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _seuilGros.toString(),
+                              decoration: const InputDecoration(labelText: 'Seuil (Qté) pour gros', border: OutlineInputBorder()),
+                              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                              inputFormatters: [
+                                FilteringTextInputFormatter.allow(RegExp(r'[0-9.,\\s-]')),
+                              ],
+                              validator: (value) {
+                                if (value != null && value.isNotEmpty) {
+                                  final num = _parseDoubleLocale(value);
+                                  if (num == null) {
+                                    return 'Doit être un nombre valide';
+                                  }
+                                  if (num < 0) {
+                                    return 'Ne peut pas être négatif';
+                                  }
+                                }
+                                return null;
+                              },
+                              onSaved: (value) => _seuilGros = _parseDoubleLocale(value) ?? 0.0,
                             ),
                           ),
                         ],
