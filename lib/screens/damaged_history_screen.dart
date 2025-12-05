@@ -11,7 +11,7 @@ class DamagedHistoryScreen extends StatefulWidget {
 }
 
 class _DamagedHistoryScreenState extends State<DamagedHistoryScreen> {
-  late Database _database;
+  Database? _database;
   final DateFormat _dateFormat = DateFormat('dd/MM/yyyy HH:mm');
   String? _selectedAction; // Filtre d'action existant
   String _searchQuery = ''; // Pour la barre de recherche
@@ -21,7 +21,7 @@ class _DamagedHistoryScreenState extends State<DamagedHistoryScreen> {
   @override
   void initState() {
     super.initState();
-    _initDatabase();
+    _ensureDatabase();
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text;
@@ -32,22 +32,28 @@ class _DamagedHistoryScreenState extends State<DamagedHistoryScreen> {
   @override
   void dispose() {
     _searchController.dispose();
-    _database.close();
+    _database?.close();
     super.dispose();
   }
 
-  Future<void> _initDatabase() async {
+  Future<Database> _ensureDatabase() async {
     try {
+      if (_database != null && _database!.isOpen) {
+        return _database!;
+      }
       _database = await openDatabase(
         path.join(await getDatabasesPath(), 'dashboard.db'),
       );
+      return _database!;
     } catch (e) {
       print('Erreur lors de l\'initialisation de la base de données : $e');
+      rethrow;
     }
   }
 
   Future<List<Map<String, dynamic>>> _getHistory() async {
     try {
+      final db = await _ensureDatabase();
       String query = '''
         SELECT 
           h.*,
@@ -99,7 +105,7 @@ class _DamagedHistoryScreenState extends State<DamagedHistoryScreen> {
       }
 
       query += ' ORDER BY h.date DESC';
-      return await _database.rawQuery(query, whereArgs);
+      return await db.rawQuery(query, whereArgs);
     } catch (e) {
       print('Erreur lors de la récupération de l\'historique : $e');
       return [];

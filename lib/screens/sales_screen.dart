@@ -1,13 +1,19 @@
-import 'dart:typed_data';
-import 'package:flutter/material.dart';
-import 'package:stock_management/helpers/database_helper.dart';
-import '../models/models.dart';
-import 'package:intl/intl.dart';
-import '../services/pdf_service.dart';
-import 'package:printing/printing.dart';
-import 'package:url_launcher/url_launcher.dart';
-import 'package:path_provider/path_provider.dart';
 import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:path/path.dart' as path;
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_management/helpers/database_helper.dart';
+import 'package:stock_management/widgets/facture_dialog.dart';
+import '../models/models.dart';
+import '../providers/auth_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
 
 class SalesScreen extends StatefulWidget {
   const SalesScreen({Key? key}) : super(key: key);
@@ -16,45 +22,58 @@ class SalesScreen extends StatefulWidget {
   State<SalesScreen> createState() => _SalesScreenState();
 }
 
-class _SalesScreenState extends State<SalesScreen>
-    with SingleTickerProviderStateMixin {
+class _SalesScreenState extends State<SalesScreen> with SingleTickerProviderStateMixin {
   late Future<List<Facture>> _facturesFuture;
-  late TabController _tabController;
   String _searchQuery = '';
   String _selectedFilter = 'Toutes';
+  DateTime? _selectedDay;
+  DateTime? _startDate;
+  DateTime? _endDate;
+  String? _selectedVendor;
+  List<String> _vendors = [];
+  List<Map<String, dynamic>> _salesByProduct = [];
+  List<Map<String, dynamic>> _salesByVendor = [];
+  double _totalCA = 0.0;
+  bool _isLoadingStats = false;
+  String? _sortOrder;
   final _futureKey = GlobalKey();
+  User? _currentUser;
+  String? _logoPath;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
     _facturesFuture = Future.value([]);
-    _initDatabase().then((_) {
-      setState(() {
-        _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+    _currentUser = user;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initDatabase().then((_) {
+        setState(() {
+          _facturesFuture = DatabaseHelper.getFactures(
+            includeArchived: true,
+            vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+          );
+        });
+        _loadVendors();
+        _loadStatistics();
+        _loadLogoPath();
+      }).catchError((e) {
+        print('Erreur lors de l\'initialisation de la base de données : $e');
+        showDialog(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Erreur'),
+            content: Text('Erreur d\'initialisation : $e'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('OK'),
+              ),
+            ],
+          ),
+        );
       });
-    }).catchError((e) {
-      print('Erreur lors de l\'initialisation de la base de données : $e');
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Erreur'),
-          content: Text('Erreur d\'initialisation : $e'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
     });
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
   }
 
   Future<void> _initDatabase() async {
@@ -67,762 +86,366 @@ class _SalesScreenState extends State<SalesScreen>
     }
   }
 
-  void _showAddFactureDialog() async {
-    final clients = await DatabaseHelper.getClients();
-    final produits = await DatabaseHelper.getProduits();
-    Client? selectedClient;
-    String? clientNom;
-    String? adresse;
-    String? magasinAdresse;
-    String? methodePaiement = 'Espèces';
-    final clientNomController = TextEditingController();
-    final adresseController = TextEditingController();
-    final magasinAdresseController = TextEditingController();
-    final ristourneController = TextEditingController();
-    final paiementController = TextEditingController();
-    final selectedItems = <Map<String, dynamic>>[];
-    final quantiteControllers = <int, TextEditingController>{};
-    final formatter = NumberFormat('#,##0.00', 'fr_FR');
-    const loggedInUser = 'Admin';
+  Future<void> _loadVendors() async {
+    final vendors = await DatabaseHelper.getVendors();
+    setState(() {
+      _vendors = vendors;
+    });
+  }
 
-    if (clients.isEmpty || produits.isEmpty) {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Erreur'),
-          content: const Text('Aucun client ou produit disponible'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('OK'),
-            ),
-          ],
-        ),
-      );
-      return;
+  Future<void> _loadStatistics() async {
+    setState(() => _isLoadingStats = true);
+    String? vendorToUse = _selectedVendor;
+    if (_currentUser != null && _currentUser!.role == 'Vendeur') {
+      vendorToUse = _currentUser!.name;
     }
+    final salesByProduct = await DatabaseHelper.getSalesByProduct(
+      specificDay: _selectedDay,
+      startDate: _startDate,
+      endDate: _endDate,
+      vendor: vendorToUse,
+    );
+    final salesByVendor = await DatabaseHelper.getSalesByVendor(
+      specificDay: _selectedDay,
+      startDate: _startDate,
+      endDate: _endDate,
+      vendor: vendorToUse,
+    );
+    final totalCA = await DatabaseHelper.getTotalCA(
+      specificDay: _selectedDay,
+      startDate: _startDate,
+      endDate: _endDate,
+      vendor: vendorToUse,
+    );
+    setState(() {
+      _salesByProduct = salesByProduct;
+      _salesByVendor = salesByVendor;
+      _totalCA = totalCA;
+      _isLoadingStats = false;
+    });
+  }
+
+  Future<String?> _pickSaveDirectory() async {
+    try {
+      final selectedDirectory = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Choisissez un dossier de sauvegarde',
+      );
+      if (selectedDirectory == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Export annulé')),
+        );
+      }
+      return selectedDirectory;
+    } catch (e) {
+      print('Erreur lors de la sélection du dossier : $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Impossible de sélectionner un dossier : $e")),
+      );
+      return null;
+    }
+  }
+
+  Future<void> _openFile(String filePath) async {
+    try {
+      if (Platform.isMacOS) {
+        await Process.run('open', [filePath]);
+      } else if (Platform.isWindows) {
+        final windowsPath = filePath.replaceAll('/', '\\');
+        await Process.run('explorer', [windowsPath]);
+      } else if (Platform.isLinux) {
+        await Process.run('xdg-open', [filePath]);
+      }
+    } catch (e) {
+      print('Erreur lors de l\'ouverture du fichier : $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("Impossible d'ouvrir le fichier : $e")),
+      );
+    }
+  }
+
+  Future<void> _generateAndPrintPdf() async {
+    final pdf = pw.Document();
+    final dateFormat = NumberFormat('#,##0.00', 'fr_FR');
+
+    pw.ImageProvider? logoImage;
+    if (_logoPath != null && File(_logoPath!).existsSync()) {
+      final logoBytes = File(_logoPath!).readAsBytesSync();
+      logoImage = pw.MemoryImage(logoBytes);
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (pw.Context context) => [
+          if (logoImage != null)
+            pw.Center(
+              child: pw.Image(logoImage, height: 80),
+            ),
+          pw.SizedBox(height: 10),
+          pw.Header(level: 0, child: pw.Text('Rapport des Statistiques des Ventes')),
+          pw.SizedBox(height: 20),
+          if (_selectedDay != null)
+            pw.Text('Date: ${DateFormat('dd/MM/yyyy').format(_selectedDay!)}'),
+          if (_startDate != null && _endDate != null)
+            pw.Text('Période: ${DateFormat('dd/MM/yyyy').format(_startDate!)} - ${DateFormat('dd/MM/yyyy').format(_endDate!)}'),
+          if (_selectedVendor != null)
+            pw.Text('Vendeur: $_selectedVendor'),
+          pw.SizedBox(height: 20),
+          pw.Text('Chiffre d\'Affaires Total: ${dateFormat.format(_totalCA)}\u00A0FCFA'),
+          pw.SizedBox(height: 20),
+          pw.Text('Ventes par Produit', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Table.fromTextArray(
+            headers: ['Produit', 'Unité', 'Quantité', 'CA (FCFA)'],
+            data: _salesByProduct.map((sale) => [
+              sale['nom'].toString(),
+              sale['unite'].toString(),
+              sale['totalQuantite'].toString(),
+              dateFormat.format(sale['totalCA']),
+            ]).toList(),
+          ),
+          pw.SizedBox(height: 20),
+          pw.Text('Ventes par Vendeur', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
+          pw.Table.fromTextArray(
+            headers: ['Vendeur', 'Factures', 'CA (FCFA)'],
+            data: _salesByVendor.map((sale) => [
+              sale['vendeurNom'].toString(),
+              sale['invoiceCount'].toString(),
+              dateFormat.format(sale['totalCA']),
+            ]).toList(),
+          ),
+        ],
+      ),
+    );
+
+    final pdfBytes = await pdf.save();
 
     showDialog(
       context: context,
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setState) {
-            double sousTotal = selectedItems.fold(
-              0.0,
-              (sum, item) => sum + item['quantite'] * item['prixUnitaire'],
-            );
-            double ristourne = double.tryParse(ristourneController.text) ?? 0.0;
-            double total = sousTotal - ristourne;
-            double montantPaye =
-                double.tryParse(paiementController.text) ?? 0.0;
-            double resteAPayer = total - montantPaye;
-            double monnaie = montantPaye > total ? montantPaye - total : 0.0;
+      builder: (context) => AlertDialog(
+        title: const Text('Exporter le PDF'),
+        content: const Text('Que souhaitez-vous faire avec le PDF généré ?'),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              try {
+                final directoryPath = await _pickSaveDirectory();
+                if (directoryPath == null) return;
+                final filePath = path.join(directoryPath, 'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf');
+                final file = await File(filePath).create(recursive: true);
+                await file.writeAsBytes(pdfBytes);
+                Navigator.pop(context);
+                await _openFile(filePath);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('PDF enregistré : $filePath')),
+                );
+              } catch (e) {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Erreur lors de l\'ouverture du PDF : $e')),
+                );
+              }
+            },
+            child: const Text('Voir PDF'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final directoryPath = await _pickSaveDirectory();
+              if (directoryPath == null) {
+                return;
+              }
+              final fileName =
+                  'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf';
+              final filePath = path.join(directoryPath, fileName);
+              final file = await File(filePath).create(recursive: true);
+              await file.writeAsBytes(pdfBytes);
+              Navigator.pop(context);
+              await _openFile(filePath);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('PDF enregistré : $filePath')),
+              );
+            },
+            child: const Text('Enregistrer'),
+          ),
+          TextButton(
+            onPressed: () async {
+              await Printing.sharePdf(
+                bytes: pdfBytes,
+                filename: 'statistiques_ventes_${DateTime.now().toIso8601String()}.pdf',
+              );
+              Navigator.pop(context);
+            },
+            child: const Text('Partager'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Annuler'),
+          ),
+        ],
+      ),
+    );
+  }
 
-            return AlertDialog(
-              title: const Text('Créer une facture'),
-              content: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.95,
-                height: MediaQuery.of(context).size.height * 0.85,
-                child: Column(
-                  children: [
-                    TabBar(
-                      controller: _tabController,
-                      labelColor: Theme.of(context).primaryColor,
-                      unselectedLabelColor: Colors.grey,
-                      indicatorColor: Theme.of(context).primaryColor,
-                      tabs: const [
-                        Tab(text: 'Détails'),
-                        Tab(text: 'Produits'),
-                        Tab(text: 'Aperçu'),
+  void _showFactureDetails(Facture facture) async {
+    final db = await DatabaseHelper.database;
+    final items = await db.rawQuery(
+      '''
+      SELECT bci.*, p.nom AS produitNom, p.unite
+      FROM bon_commande_items bci
+      JOIN produits p ON bci.produitId = p.id
+      WHERE bci.bonCommandeId = ?
+    ''',
+      [facture.bonCommandeId],
+    );
+    final paiements = await db.query(
+      'paiements',
+      where: 'factureId = ?',
+      whereArgs: [facture.id],
+    );
+    FactureArchivee? archivedFacture;
+    if (facture.statut == 'Annulée') {
+      final archived = await DatabaseHelper.getArchivedFacture(facture.id);
+      archivedFacture = archived;
+    }
+    final formatter = NumberFormat('#,##0.00', 'fr_FR');
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Détails de la facture ${facture.numero}'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildInfoRow('Client', facture.clientNom ?? 'Non spécifié'),
+              _buildInfoRow('Adresse', facture.adresse ?? 'Non spécifiée'),
+              _buildInfoRow('Adresse fournisseur', facture.magasinAdresse ?? 'Non spécifié'),
+              _buildInfoRow('Vendeur', facture.vendeurNom ?? 'Non spécifié'),
+              _buildInfoRow('Date', '${DateFormat('dd/MM/yyyy').format(facture.date)} à ${DateFormat('HH:mm').format(facture.date)}'),
+              _buildInfoRow('Statut', facture.statut),
+              _buildInfoRow('Statut paiement', facture.statutPaiement),
+              _buildInfoRow('Total', '${formatter.format(facture.total)}\u00A0FCFA'),
+              _buildInfoRow('Ristourne', '${formatter.format(facture.ristourne)}\u00A0FCFA'),
+              _buildInfoRow('Payé', '${formatter.format(facture.montantPaye ?? 0.0)}\u00A0FCFA'),
+              if (facture.montantRemis != null)
+                _buildInfoRow('Montant remis', '${formatter.format(facture.montantRemis)}\u00A0FCFA'),
+              if (facture.monnaie != null)
+                _buildInfoRow('Monnaie', '${formatter.format(facture.monnaie)}\u00A0FCFA'),
+              _buildInfoRow('Reste à payer', '${formatter.format(facture.total - (facture.montantPaye ?? 0.0))}\u00A0FCFA'),
+              if (facture.statut == 'Annulée' && archivedFacture != null) ...[
+                const SizedBox(height: 16),
+                const Text('Détails de l\'annulation:', style: TextStyle(fontWeight: FontWeight.bold)),
+                _buildInfoRow('Motif', archivedFacture.motifAnnulation),
+                _buildInfoRow('Date d\'annulation', DateFormat('dd/MM/yyyy').format(archivedFacture.dateAnnulation)),
+              ],
+              const SizedBox(height: 16),
+              const Text('Articles:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...items.map((item) {
+                final quantite = (item['quantite'] as num?)?.toInt() ?? 0;
+                final prixUnitaire = (item['prixUnitaire'] as num?)?.toDouble() ?? 0.0;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4.0),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${item['produitNom']} x $quantite ${item['unite']}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      Text('${formatter.format(quantite * prixUnitaire)}\u00A0FCFA'),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 16),
+              const Text('Paiements:', style: TextStyle(fontWeight: FontWeight.bold)),
+              ...paiements.map((paiement) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '${paiement['methode']} - ${DateFormat('dd/MM/yyyy').format(DateTime.fromMillisecondsSinceEpoch(paiement['date'] as int))}',
+                            ),
+                            Text('${formatter.format(paiement['montant'])}\u00A0FCFA'),
+                          ],
+                        ),
+                        if (paiement['montantRemis'] != null)
+                          Text('Remis: ${formatter.format(paiement['montantRemis'])}\u00A0FCFA'),
+                        if (paiement['monnaie'] != null)
+                          Text('Monnaie: ${formatter.format(paiement['monnaie'])}\u00A0FCFA'),
                       ],
                     ),
-                    Expanded(
-                      child: TabBarView(
-                        controller: _tabController,
-                        children: [
-                          SingleChildScrollView(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                DropdownButton<Client>(
-                                  hint: const Text(
-                                    'Sélectionner un client (ou laisser vide)',
-                                  ),
-                                  value: selectedClient,
-                                  isExpanded: true,
-                                  items: [
-                                    const DropdownMenuItem<Client>(
-                                      value: null,
-                                      child: Text(
-                                        'Aucun client (saisie manuelle)',
-                                      ),
-                                    ),
-                                    ...clients.map((client) {
-                                      return DropdownMenuItem<Client>(
-                                        value: client,
-                                        child: Text(client.nom),
-                                      );
-                                    }),
-                                  ],
-                                  onChanged: (value) {
-                                    setState(() {
-                                      selectedClient = value;
-                                      if (value != null) {
-                                        clientNom = value.nom;
-                                        adresse = value.adresse;
-                                        clientNomController.text = value.nom;
-                                        adresseController.text =
-                                            value.adresse ?? '';
-                                      } else {
-                                        clientNom = null;
-                                        adresse = null;
-                                        clientNomController.clear();
-                                        adresseController.clear();
-                                      }
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                TextField(
-                                  controller: clientNomController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Nom du client',
-                                    hintText: 'Entrez ou modifiez le nom',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      clientNom = value.isEmpty ? null : value;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                TextField(
-                                  controller: adresseController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Adresse du client',
-                                    hintText: 'Entrez ou modifiez l\'adresse',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      adresse = value.isEmpty ? null : value;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                TextField(
-                                  controller: magasinAdresseController,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Adresse du fournisseur',
-                                    hintText:
-                                        'Entrez l\'adresse du fournisseur',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      magasinAdresse =
-                                          value.isEmpty ? null : value;
-                                    });
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                TextField(
-                                  controller: ristourneController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Ristourne (FCFA)',
-                                    hintText: 'Entrez la ristourne',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {});
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                TextField(
-                                  controller: paiementController,
-                                  keyboardType: TextInputType.number,
-                                  decoration: const InputDecoration(
-                                    labelText: 'Montant payé (FCFA)',
-                                    hintText: 'Entrez le montant payé',
-                                    border: OutlineInputBorder(),
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {});
-                                  },
-                                ),
-                                const SizedBox(height: 16.0),
-                                DropdownButton<String>(
-                                  value: methodePaiement,
-                                  isExpanded: true,
-                                  items:
-                                      ['Espèces', 'Carte', 'Virement'].map((
-                                        String value,
-                                      ) {
-                                        return DropdownMenuItem<String>(
-                                          value: value,
-                                          child: Text(value),
-                                        );
-                                      }).toList(),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      methodePaiement = value;
-                                    });
-                                  },
-                                ),
-                              ],
-                            ),
-                          ),
-                          SingleChildScrollView(
-                            padding: const EdgeInsets.all(16.0),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Text(
-                                  'Produits :',
-                                  style: TextStyle(fontWeight: FontWeight.bold),
-                                ),
-                                ...produits.map((produit) {
-                                  final controller = quantiteControllers
-                                      .putIfAbsent(
-                                        produit.id,
-                                        () => TextEditingController(),
-                                      );
-                                  return Card(
-                                    elevation: 2.0,
-                                    margin: const EdgeInsets.symmetric(
-                                      vertical: 4.0,
-                                    ),
-                                    child: ListTile(
-                                      title: Text(produit.nom),
-                                      subtitle: Text(
-                                        '${formatter.format(produit.prixVente)} FCFA / ${produit.unite}',
-                                      ),
-                                      trailing: SizedBox(
-                                        width: 80,
-                                        child: TextField(
-                                          controller: controller,
-                                          keyboardType: TextInputType.number,
-                                          decoration: const InputDecoration(
-                                            labelText: 'Qté',
-                                            border: OutlineInputBorder(),
-                                          ),
-                                          onChanged: (value) {
-                                            setState(() {
-                                              final quantite =
-                                                  int.tryParse(value) ?? 0;
-                                              selectedItems.removeWhere(
-                                                (item) =>
-                                                    item['produitId'] ==
-                                                    produit.id,
-                                              );
-                                              if (quantite > 0) {
-                                                selectedItems.add({
-                                                  'produitId': produit.id,
-                                                  'produitNom': produit.nom,
-                                                  'quantite': quantite,
-                                                  'prixUnitaire':
-                                                      produit.prixVente,
-                                                  'unite': produit.unite,
-                                                });
-                                              }
-                                            });
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                  );
-                                }),
-                              ],
-                            ),
-                          ),
-                          SingleChildScrollView(
-                            padding: const EdgeInsets.all(16.0),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 300),
-                              child: Card(
-                                elevation: 4.0,
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16.0),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'Aperçu de la facture',
-                                        style: TextStyle(
-                                          fontSize: 18,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      const Divider(),
-                                      Text(
-                                        'Numéro: FACT${DateTime.now().year}-${(selectedItems.isNotEmpty ? 1 : 0).toString().padLeft(4, '0')}',
-                                      ),
-                                      Text(
-                                        'Date: ${DateTime.now().toString().substring(0, 10)}',
-                                      ),
-                                      Text(
-                                        'Client: ${clientNom ?? '............................'}',
-                                      ),
-                                      Text(
-                                        'Adresse client: ${adresse ?? 'Non spécifiée'}',
-                                      ),
-                                      Text(
-                                        'Adresse fournisseur: ${magasinAdresse ?? 'Non spécifié'}',
-                                      ),
-                                      Text('Vendeur: $loggedInUser'),
-                                      const SizedBox(height: 8.0),
-                                      const Text(
-                                        'Articles:',
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      ),
-                                      ...selectedItems.map((item) {
-                                        return Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                            vertical: 4.0,
-                                          ),
-                                          child: Row(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  '${item['produitNom']} x ${item['quantite']} ${item['unite']}',
-                                                  overflow:
-                                                      TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                              Text(
-                                                '${formatter.format(item['quantite'] * item['prixUnitaire'])} FCFA',
-                                              ),
-                                            ],
-                                          ),
-                                        );
-                                      }),
-                                      const Divider(),
-                                      Text(
-                                        'Sous-total: ${formatter.format(sousTotal)} FCFA',
-                                      ),
-                                      Text(
-                                        'Ristourne: ${formatter.format(ristourne)} FCFA',
-                                      ),
-                                      Text(
-                                        'Total: ${formatter.format(total)} FCFA',
-                                      ),
-                                      Text(
-                                        'Payé: ${formatter.format(montantPaye)} FCFA',
-                                      ),
-                                      if (montantPaye > total)
-                                        Text(
-                                          'Monnaie: ${formatter.format(monnaie)} FCFA',
-                                        ),
-                                      Text(
-                                        'Reste à payer: ${formatter.format(resteAPayer >= 0 ? resteAPayer : 0)} FCFA',
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text('Annuler'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    try {
-                      final numero =
-                          'FACT${DateTime.now().year}-${(selectedItems.isNotEmpty ? 1 : 0).toString().padLeft(4, '0')}';
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Choisir une option'),
-                          content: const Text(
-                            'Voulez-vous générer un PDF ou imprimer directement ?',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('Annuler'),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                Navigator.pop(context);
-                                showDialog(
-                                  context: context,
-                                  builder: (context) => AlertDialog(
-                                    title: const Text('Aperçu de la facture'),
-                                    content: SingleChildScrollView(
-                                      child: _buildPrintableFacture(
-                                        clientNom: clientNom,
-                                        adresse: adresse,
-                                        magasinAdresse: magasinAdresse,
-                                        vendeurNom: loggedInUser,
-                                        items: selectedItems,
-                                        sousTotal: sousTotal,
-                                        ristourne: ristourne,
-                                        total: total,
-                                        montantPaye: montantPaye,
-                                        resteAPayer: resteAPayer,
-                                        montantRemis: montantPaye,
-                                        monnaie: monnaie,
-                                        numero: numero,
-                                        date: DateTime.now(),
-                                      ),
-                                    ),
-                                    actions: [
-                                      TextButton(
-                                        onPressed: () => Navigator.pop(context),
-                                        child: const Text('Fermer'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () async {
-                                          try {
-                                            final directory =
-                                                await getApplicationDocumentsDirectory();
-                                            final path =
-                                                '${directory.path}/facture_$numero.pdf';
-                                            await PdfService.saveFacture(
-                                              numero: numero,
-                                              date: DateTime.now(),
-                                              clientNom: clientNom,
-                                              clientAdresse: adresse,
-                                              magasinAdresse: magasinAdresse,
-                                              vendeurNom: loggedInUser,
-                                              items: selectedItems,
-                                              sousTotal: sousTotal,
-                                              ristourne: ristourne,
-                                              total: total,
-                                              montantPaye: montantPaye,
-                                              resteAPayer: resteAPayer,
-                                              montantRemis: montantPaye,
-                                              monnaie: monnaie,
-                                            );
-                                            Navigator.pop(context);
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  'Facture $numero enregistrée dans $path',
-                                                ),
-                                                action: SnackBarAction(
-                                                  label: 'Ouvrir dossier',
-                                                  onPressed: () async {
-                                                    final uri = Uri.parse(
-                                                      directory.path,
-                                                    );
-                                                    if (await canLaunchUrl(
-                                                        uri)) {
-                                                      await launchUrl(uri);
-                                                    } else {
-                                                      ScaffoldMessenger.of(
-                                                              context)
-                                                          .showSnackBar(
-                                                        const SnackBar(
-                                                          content: Text(
-                                                            'Impossible d\'ouvrir le dossier',
-                                                          ),
-                                                        ),
-                                                      );
-                                                    }
-                                                  },
-                                                ),
-                                              ),
-                                            );
-                                          } catch (e) {
-                                            Navigator.pop(context);
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  'Erreur lors de l\'enregistrement : $e',
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: const Text('Enregistrer'),
-                                      ),
-                                      TextButton(
-                                        onPressed: () async {
-                                          try {
-                                            await PdfService.shareFacture(
-                                              numero: numero,
-                                              date: DateTime.now(),
-                                              clientNom: clientNom,
-                                              clientAdresse: adresse,
-                                              magasinAdresse: magasinAdresse,
-                                              vendeurNom: loggedInUser,
-                                              items: selectedItems,
-                                              sousTotal: sousTotal,
-                                              ristourne: ristourne,
-                                              total: total,
-                                              montantPaye: montantPaye,
-                                              resteAPayer: resteAPayer,
-                                              montantRemis: montantPaye,
-                                              monnaie: monnaie,
-                                            );
-                                            Navigator.pop(context);
-                                          } catch (e) {
-                                            Navigator.pop(context);
-                                            ScaffoldMessenger.of(context)
-                                                .showSnackBar(
-                                              SnackBar(
-                                                content: Text(
-                                                  'Erreur lors du partage : $e',
-                                                ),
-                                              ),
-                                            );
-                                          }
-                                        },
-                                        child: const Text('Partager'),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              },
-                              child: const Text('PDF'),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                Navigator.pop(context);
-                                try {
-                                  final bytes = await PdfService.getPdfBytes(
-                                    numero: numero,
-                                    date: DateTime.now(),
-                                    clientNom: clientNom,
-                                    clientAdresse: adresse,
-                                    magasinAdresse: magasinAdresse,
-                                    vendeurNom: loggedInUser,
-                                    items: selectedItems,
-                                    sousTotal: sousTotal,
-                                    ristourne: ristourne,
-                                    total: total,
-                                    montantPaye: montantPaye,
-                                    resteAPayer: resteAPayer,
-                                    montantRemis: montantPaye,
-                                    monnaie: monnaie,
-                                  );
-                                  final printer = await Printing.pickPrinter(
-                                    context: context,
-                                  );
-                                  if (printer == null) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Aucune imprimante sélectionnée',
-                                        ),
-                                      ),
-                                    );
-                                    return;
-                                  }
-                                  await Printing.layoutPdf(
-                                    onLayout: (_) => Uint8List.fromList(bytes),
-                                    name: 'Facture $numero',
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Impression de $numero envoyée',
-                                      ),
-                                    ),
-                                  );
-                                } catch (e) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        'Erreur lors de l\'impression : $e',
-                                      ),
-                                    ),
-                                  );
-                                }
-                              },
-                              child: const Text('Imprimante'),
-                            ),
-                          ],
-                        ),
-                      );
-                    } catch (e) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text('Erreur : $e')));
-                    }
-                  },
-                  child: const Text('Aperçu'),
-                ),
-                TextButton(
-                  onPressed: () async {
-                    if (selectedItems.isEmpty) {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Erreur'),
-                          content: const Text(
-                            'Sélectionnez au moins un produit',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
-                      return;
-                    }
-                    if (ristourne > sousTotal) {
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Erreur'),
-                          content: const Text(
-                            'La ristourne ne peut pas dépasser le sous-total',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
-                      return;
-                    }
-
-                    try {
-                      final db = await DatabaseHelper.database;
-                      await db.transaction((txn) async {
-                        final bonCommandeId =
-                            await txn.insert('bons_commande', {
-                          'clientId': selectedClient?.id ?? 0,
-                          'clientNom': clientNom,
-                          'date': DateTime.now().millisecondsSinceEpoch,
-                          'statut': 'Confirmé',
-                          'total': total,
-                        });
-
-                        for (var item in selectedItems) {
-                          await txn.insert('bon_commande_items', {
-                            'bonCommandeId': bonCommandeId,
+                  )),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
+          if (facture.statut == 'Active') ...[
+            TextButton(
+              onPressed: () => _showCancelFactureDialog(facture),
+              child: const Text('Annuler', style: TextStyle(color: Colors.red)),
+            ),
+            TextButton(
+              onPressed: () async {
+                final db = await DatabaseHelper.database;
+                final items = await db.rawQuery(
+                  '''
+                  SELECT bci.*, p.nom AS produitNom, p.unite
+                  FROM bon_commande_items bci
+                  JOIN produits p ON bci.produitId = p.id
+                  WHERE bci.bonCommandeId = ?
+                ''',
+                  [facture.bonCommandeId],
+                );
+                FactureDialog.showPrintOptions(
+                  context: context,
+                  numero: facture.numero,
+                  date: facture.date,
+                  clientNom: facture.clientNom,
+                  adresse: facture.adresse,
+                  magasinAdresse: facture.magasinAdresse,
+                  vendeurNom: facture.vendeurNom ?? 'Non spécifié',
+                  items: items
+                      .map((item) => {
                             'produitId': item['produitId'],
+                            'produitNom': item['produitNom'],
                             'quantite': item['quantite'],
                             'prixUnitaire': item['prixUnitaire'],
-                          });
-
-                          final produit = produits.firstWhere(
-                            (p) => p.id == item['produitId'],
-                          );
-                          if (produit.quantiteStock < item['quantite']) {
-                            throw Exception(
-                              'Stock insuffisant pour ${produit.nom}',
-                            );
-                          }
-                          await txn.update(
-                            'produits',
-                            {
-                              'quantiteStock':
-                                  produit.quantiteStock - item['quantite'],
-                            },
-                            where: 'id = ?',
-                            whereArgs: [produit.id],
-                          );
-                        }
-
-                        final factureCount = await txn.query('factures');
-                        final numero =
-                            'FACT${DateTime.now().year}-${(factureCount.length + 1).toString().padLeft(4, '0')}';
-                        final factureId = await txn.insert('factures', {
-                          'numero': numero,
-                          'bonCommandeId': bonCommandeId,
-                          'clientId': selectedClient?.id ?? 0,
-                          'clientNom': clientNom,
-                          'adresse': adresse,
-                          'vendeurNom': loggedInUser,
-                          'magasinAdresse': magasinAdresse,
-                          'ristourne': ristourne,
-                          'date': DateTime.now().millisecondsSinceEpoch,
-                          'total': total,
-                          'statutPaiement':
-                              montantPaye >= total ? 'Payé' : 'En attente',
-                          'montantPaye': montantPaye,
-                          'montantRemis': montantPaye,
-                          'monnaie': monnaie,
-                          'statut': 'Active',
-                        });
-
-                        if (montantPaye > 0) {
-                          await txn.insert('paiements', {
-                            'factureId': factureId,
-                            'montant': montantPaye,
-                            'montantRemis': montantPaye,
-                            'monnaie': monnaie,
-                            'date': DateTime.now().millisecondsSinceEpoch,
-                            'methode': methodePaiement!,
-                          });
-                        }
-                      });
-
-                      setState(() {
-                        _facturesFuture = DatabaseHelper.getFactures(
-                            includeArchived: true);
-                      });
-                      Navigator.pop(context);
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Succès'),
-                          content: const Text('Facture créée avec succès'),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
-                      print('Facture créée avec succès');
-                    } catch (e) {
-                      print('Erreur lors de la création de la facture : $e');
-                      showDialog(
-                        context: context,
-                        builder: (context) => AlertDialog(
-                          title: const Text('Erreur'),
-                          content: Text(
-                            'Erreur lors de la création de la facture : $e',
-                          ),
-                          actions: [
-                            TextButton(
-                              onPressed: () => Navigator.pop(context),
-                              child: const Text('OK'),
-                            ),
-                          ],
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text('Créer'),
-                ),
-              ],
-            );
-          },
-        );
-      },
+                            'unite': item['unite'],
+                          })
+                      .toList(),
+                  sousTotal: facture.total + (facture.ristourne ?? 0.0),
+                  ristourne: facture.ristourne ?? 0.0,
+                  total: facture.total,
+                  montantPaye: facture.montantPaye ?? 0.0,
+                  resteAPayer: facture.total - (facture.montantPaye ?? 0.0),
+                  montantRemis: facture.montantRemis,
+                  monnaie: facture.monnaie,
+                );
+              },
+              child: const Text('Imprimer/PDF'),
+            ),
+            if (facture.total - (facture.montantPaye ?? 0.0) > 0)
+              TextButton(
+                onPressed: () => _showAddPaymentDialog(facture),
+                child: const Text('Ajouter paiement'),
+              ),
+          ],
+        ],
+      ),
     );
   }
 
   void _showCancelFactureDialog(Facture facture) {
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     final motifController = TextEditingController();
     showDialog(
       context: context,
@@ -830,7 +453,10 @@ class _SalesScreenState extends State<SalesScreen>
         title: Text('Annuler la facture ${facture.numero}'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text('Annulé par: ${user?.name ?? 'Utilisateur inconnu'}'),
+            const SizedBox(height: 16.0),
             const Text('Veuillez entrer le motif de l\'annulation :'),
             const SizedBox(height: 16.0),
             TextField(
@@ -871,16 +497,18 @@ class _SalesScreenState extends State<SalesScreen>
               try {
                 await DatabaseHelper.cancelFacture(facture.id, motif);
                 setState(() {
-                  _facturesFuture =
-                      DatabaseHelper.getFactures(includeArchived: true);
+                  _facturesFuture = DatabaseHelper.getFactures(
+                    includeArchived: true,
+                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                  );
+                  _loadStatistics();
                 });
                 Navigator.pop(context);
                 showDialog(
                   context: context,
                   builder: (context) => AlertDialog(
                     title: const Text('Succès'),
-                    content:
-                        Text('Facture ${facture.numero} annulée avec succès.'),
+                    content: Text('Facture ${facture.numero} annulée avec succès.'),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
@@ -912,221 +540,8 @@ class _SalesScreenState extends State<SalesScreen>
     );
   }
 
-  void _showFactureDetails(Facture facture) async {
-    final db = await DatabaseHelper.database;
-    final items = await db.rawQuery(
-      '''
-      SELECT bci.*, p.nom AS produitNom, p.unite
-      FROM bon_commande_items bci
-      JOIN produits p ON bci.produitId = p.id
-      WHERE bci.bonCommandeId = ?
-    ''',
-      [facture.bonCommandeId],
-    );
-    final paiements = await db.query(
-      'paiements',
-      where: 'factureId = ?',
-      whereArgs: [facture.id],
-    );
-    FactureArchivee? archivedFacture;
-    if (facture.statut == 'Annulée') {
-      final archived = await DatabaseHelper.getArchivedFacture(facture.id);
-      archivedFacture = archived;
-    }
-    final formatter = NumberFormat('#,##0.00', 'fr_FR');
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Détails de la facture ${facture.numero}'),
-        content: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildInfoRow('Client', facture.clientNom ?? 'Non spécifié'),
-              _buildInfoRow('Adresse', facture.adresse ?? 'Non spécifiée'),
-              _buildInfoRow(
-                'Adresse fournisseur',
-                facture.magasinAdresse ?? 'Non spécifié',
-              ),
-              _buildInfoRow(
-                'Vendeur',
-                facture.vendeurNom ?? 'Non spécifié',
-              ),
-              _buildInfoRow(
-                'Date',
-                DateFormat('dd/MM/yyyy').format(facture.date),
-              ),
-              _buildInfoRow('Statut', facture.statut),
-              _buildInfoRow('Statut paiement', facture.statutPaiement),
-              _buildInfoRow(
-                'Total',
-                '${formatter.format(facture.total)} FCFA',
-              ),
-              _buildInfoRow(
-                'Ristourne',
-                '${formatter.format(facture.ristourne)} FCFA',
-              ),
-              _buildInfoRow(
-                'Payé',
-                '${formatter.format(facture.montantPaye ?? 0.0)} FCFA',
-              ),
-              if (facture.montantRemis != null)
-                _buildInfoRow(
-                  'Montant remis',
-                  '${formatter.format(facture.montantRemis)} FCFA',
-                ),
-              if (facture.monnaie != null)
-                _buildInfoRow(
-                  'Monnaie',
-                  '${formatter.format(facture.monnaie)} FCFA',
-                ),
-              _buildInfoRow(
-                'Reste à payer',
-                '${formatter.format(facture.total - (facture.montantPaye ?? 0.0))} FCFA',
-              ),
-              if (facture.statut == 'Annulée' && archivedFacture != null) ...[
-                const SizedBox(height: 16),
-                const Text(
-                  'Détails de l\'annulation:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                _buildInfoRow('Motif', archivedFacture.motifAnnulation),
-                _buildInfoRow(
-                  'Date d\'annulation',
-                  DateFormat('dd/MM/yyyy')
-                      .format(archivedFacture.dateAnnulation),
-                ),
-              ],
-              const SizedBox(height: 16),
-              const Text(
-                'Articles:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              ...items.map((item) {
-                final quantite = (item['quantite'] as num?)?.toInt() ?? 0;
-                final prixUnitaire =
-                    (item['prixUnitaire'] as num?)?.toDouble() ?? 0.0;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Expanded(
-                        child: Text(
-                          '${item['produitNom']} x $quantite ${item['unite']}',
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      Text(
-                        '${formatter.format(quantite * prixUnitaire)} FCFA',
-                      ),
-                    ],
-                  ),
-                );
-              }),
-              const SizedBox(height: 16),
-              const Text(
-                'Paiements:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              ...paiements.map(
-                (paiement) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${paiement['methode']} - ${DateFormat('dd/MM/yyyy').format(DateTime.fromMillisecondsSinceEpoch(paiement['date'] as int))}',
-                          ),
-                          Text(
-                            '${formatter.format(paiement['montant'])} FCFA',
-                          ),
-                        ],
-                      ),
-                      if (paiement['montantRemis'] != null)
-                        Text(
-                          'Remis: ${formatter.format(paiement['montantRemis'])} FCFA',
-                        ),
-                      if (paiement['monnaie'] != null)
-                        Text(
-                          'Monnaie: ${formatter.format(paiement['monnaie'])} FCFA',
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-          if (facture.statut == 'Active') ...[
-            TextButton(
-              onPressed: () => _showCancelFactureDialog(facture),
-              child: const Text(
-                'Annuler',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                final items = await db.rawQuery(
-                  '''
-                  SELECT bci.*, p.nom AS produitNom, p.unite
-                  FROM bon_commande_items bci
-                  JOIN produits p ON bci.produitId = p.id
-                  WHERE bci.bonCommandeId = ?
-                ''',
-                  [facture.bonCommandeId],
-                );
-                _showPrintOptions(
-                  numero: facture.numero,
-                  date: facture.date,
-                  clientNom: facture.clientNom,
-                  adresse: facture.adresse,
-                  magasinAdresse: facture.magasinAdresse,
-                  vendeurNom: facture.vendeurNom ?? 'Admin',
-                  items: items
-                      .map(
-                        (item) => {
-                          'produitId': item['produitId'],
-                          'produitNom': item['produitNom'],
-                          'quantite': item['quantite'],
-                          'prixUnitaire': item['prixUnitaire'],
-                          'unite': item['unite'],
-                        },
-                      )
-                      .toList(),
-                  sousTotal: facture.total + (facture.ristourne ?? 0.0),
-                  ristourne: facture.ristourne ?? 0.0,
-                  total: facture.total,
-                  montantPaye: facture.montantPaye ?? 0.0,
-                  resteAPayer: facture.total - (facture.montantPaye ?? 0.0),
-                  montantRemis: facture.montantRemis,
-                  monnaie: facture.monnaie,
-                );
-              },
-              child: const Text('Imprimer/PDF'),
-            ),
-            if (facture.total - (facture.montantPaye ?? 0.0) > 0)
-              TextButton(
-                onPressed: () => _showAddPaymentDialog(facture),
-                child: const Text('Ajouter paiement'),
-              ),
-          ],
-        ],
-      ),
-    );
-  }
-
   void _showAddPaymentDialog(Facture facture) {
+    final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
     double montantPaye = facture.montantPaye ?? 0.0;
     final montantController = TextEditingController();
     final montantRemisController = TextEditingController();
@@ -1139,17 +554,18 @@ class _SalesScreenState extends State<SalesScreen>
         return StatefulBuilder(
           builder: (context, setState) {
             double montant = double.tryParse(montantController.text) ?? 0.0;
-            double montantRemis =
-                double.tryParse(montantRemisController.text) ?? 0.0;
-            double monnaie =
-                montantRemis > montant ? montantRemis - montant : 0.0;
+            double montantRemis = double.tryParse(montantRemisController.text) ?? 0.0;
+            double monnaie = montantRemis > montant ? montantRemis - montant : 0.0;
 
             return AlertDialog(
               title: const Text('Ajouter un paiement'),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text('Payé par: ${user?.name ?? 'Utilisateur inconnu'}'),
+                    const SizedBox(height: 16.0),
                     TextField(
                       controller: montantController,
                       keyboardType: TextInputType.number,
@@ -1176,18 +592,17 @@ class _SalesScreenState extends State<SalesScreen>
                       },
                     ),
                     const SizedBox(height: 16.0),
-                    Text('Monnaie: ${formatter.format(monnaie)} FCFA'),
+                    Text('Monnaie: ${formatter.format(monnaie)}\u00A0FCFA'),
                     const SizedBox(height: 16.0),
                     DropdownButton<String>(
                       value: methode,
                       isExpanded: true,
-                      items:
-                          ['Espèces', 'Carte', 'Virement'].map((String value) {
-                            return DropdownMenuItem<String>(
-                              value: value,
-                              child: Text(value),
-                            );
-                          }).toList(),
+                      items: ['Espèces', 'Carte', 'Virement'].map((String value) {
+                        return DropdownMenuItem<String>(
+                          value: value,
+                          child: Text(value),
+                        );
+                      }).toList(),
                       onChanged: (value) {
                         setState(() {
                           methode = value;
@@ -1205,17 +620,13 @@ class _SalesScreenState extends State<SalesScreen>
                 TextButton(
                   onPressed: () async {
                     final montant = double.tryParse(montantController.text);
-                    final montantRemis = double.tryParse(
-                      montantRemisController.text,
-                    );
+                    final montantRemis = double.tryParse(montantRemisController.text);
                     if (montant == null || montant <= 0) {
                       showDialog(
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Erreur'),
-                          content: const Text(
-                            'Veuillez entrer un montant valide.',
-                          ),
+                          content: const Text('Veuillez entrer un montant valide.'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
@@ -1231,9 +642,7 @@ class _SalesScreenState extends State<SalesScreen>
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Erreur'),
-                          content: const Text(
-                            'Le montant remis doit être supérieur ou égal au montant.',
-                          ),
+                          content: const Text('Le montant remis doit être supérieur ou égal au montant.'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
@@ -1249,9 +658,7 @@ class _SalesScreenState extends State<SalesScreen>
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Erreur'),
-                          content: const Text(
-                            'Le paiement dépasse le montant dû.',
-                          ),
+                          content: const Text('Le paiement dépasse le montant dû.'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
@@ -1272,17 +679,18 @@ class _SalesScreenState extends State<SalesScreen>
                         monnaie: monnaie,
                       );
                       setState(() {
-                        _facturesFuture =
-                            DatabaseHelper.getFactures(includeArchived: true);
+                        _facturesFuture = DatabaseHelper.getFactures(
+                          includeArchived: true,
+                          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                        );
+                        _loadStatistics();
                       });
                       Navigator.pop(context);
                       showDialog(
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Succès'),
-                          content: Text(
-                            'Paiement de ${formatter.format(montant)} FCFA ajouté avec succès',
-                          ),
+                          content: Text('Paiement de ${formatter.format(montant)}\u00A0FCFA ajouté avec succès'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
@@ -1296,9 +704,7 @@ class _SalesScreenState extends State<SalesScreen>
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Erreur'),
-                          content: Text(
-                            'Erreur lors de l\'ajout du paiement : $e',
-                          ),
+                          content: Text('Erreur lors de l\'ajout du paiement : $e'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context),
@@ -1319,486 +725,69 @@ class _SalesScreenState extends State<SalesScreen>
     );
   }
 
-  void _showPrintOptions({
-    required String numero,
-    required DateTime date,
-    required String? clientNom,
-    required String? adresse,
-    required String? magasinAdresse,
-    required String vendeurNom,
-    required List<Map<String, dynamic>> items,
-    required double sousTotal,
-    required double ristourne,
-    required double total,
-    required double montantPaye,
-    required double resteAPayer,
-    double? montantRemis,
-    double? monnaie,
-  }) async {
-    try {
-      showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('Choisir une option'),
-          content: const Text(
-            'Voulez-vous générer un PDF ou imprimer directement ?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Annuler'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                showDialog(
-                  context: context,
-                  builder: (context) => AlertDialog(
-                    title: const Text('Aperçu de la facture'),
-                    content: SingleChildScrollView(
-                      child: _buildPrintableFacture(
-                        clientNom: clientNom,
-                        adresse: adresse,
-                        magasinAdresse: magasinAdresse,
-                        vendeurNom: vendeurNom,
-                        items: items,
-                        sousTotal: sousTotal,
-                        ristourne: ristourne,
-                        total: total,
-                        montantPaye: montantPaye,
-                        resteAPayer: resteAPayer,
-                        montantRemis: montantRemis,
-                        monnaie: monnaie,
-                        numero: numero,
-                        date: date,
-                      ),
-                    ),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: const Text('Fermer'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          try {
-                            final directory =
-                                await getApplicationDocumentsDirectory();
-                            final path =
-                                '${directory.path}/facture_$numero.pdf';
-                            await PdfService.saveFacture(
-                              numero: numero,
-                              date: date,
-                              clientNom: clientNom,
-                              clientAdresse: adresse,
-                              magasinAdresse: magasinAdresse,
-                              vendeurNom: vendeurNom,
-                              items: items,
-                              sousTotal: sousTotal,
-                              ristourne: ristourne,
-                              total: total,
-                              montantPaye: montantPaye,
-                              resteAPayer: resteAPayer,
-                              montantRemis: montantRemis,
-                              monnaie: monnaie,
-                            );
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Facture $numero enregistrée dans $path',
-                                ),
-                                action: SnackBarAction(
-                                  label: 'Ouvrir dossier',
-                                  onPressed: () async {
-                                    final uri = Uri.parse(directory.path);
-                                    if (await canLaunchUrl(uri)) {
-                                      await launchUrl(uri);
-                                    } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(
-                                          content: Text(
-                                            'Impossible d\'ouvrir le dossier',
-                                          ),
-                                        ),
-                                      );
-                                    }
-                                  },
-                                ),
-                              ),
-                            );
-                          } catch (e) {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Erreur lors de l\'enregistrement : $e',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text('Enregistrer'),
-                      ),
-                      TextButton(
-                        onPressed: () async {
-                          try {
-                            await PdfService.shareFacture(
-                              numero: numero,
-                              date: date,
-                              clientNom: clientNom,
-                              clientAdresse: adresse,
-                              magasinAdresse: magasinAdresse,
-                              vendeurNom: vendeurNom,
-                              items: items,
-                              sousTotal: sousTotal,
-                              ristourne: ristourne,
-                              total: total,
-                              montantPaye: montantPaye,
-                              resteAPayer: resteAPayer,
-                              montantRemis: montantRemis,
-                              monnaie: monnaie,
-                            );
-                            Navigator.pop(context);
-                          } catch (e) {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Erreur lors du partage : $e',
-                                ),
-                              ),
-                            );
-                          }
-                        },
-                        child: const Text('Partager'),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              child: const Text('PDF'),
-            ),
-            TextButton(
-              onPressed: () async {
-                Navigator.pop(context);
-                try {
-                  final bytes = await PdfService.getPdfBytes(
-                    numero: numero,
-                    date: date,
-                    clientNom: clientNom,
-                    clientAdresse: adresse,
-                    magasinAdresse: magasinAdresse,
-                    vendeurNom: vendeurNom,
-                    items: items,
-                    sousTotal: sousTotal,
-                    ristourne: ristourne,
-                    total: total,
-                    montantPaye: montantPaye,
-                    resteAPayer: resteAPayer,
-                    montantRemis: montantRemis,
-                    monnaie: monnaie,
-                  );
-                  final printer = await Printing.pickPrinter(context: context);
-                  if (printer == null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Aucune imprimante sélectionnée'),
-                      ),
-                    );
-                    return;
-                  }
-                  await Printing.layoutPdf(
-                    onLayout: (_) => Uint8List.fromList(bytes),
-                    name: 'Facture $numero',
-                  );
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Impression de $numero envoyée'),
-                    ),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Erreur lors de l\'impression : $e'),
-                    ),
-                  );
-                }
-              },
-              child: const Text('Imprimante'),
-            ),
-          ],
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Erreur : $e')));
+  Future<void> _selectDay(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDay ?? DateTime.now(),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedDay = picked;
+        _startDate = null;
+        _endDate = null;
+        _facturesFuture = DatabaseHelper.getFactures(
+          includeArchived: true,
+          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+        );
+        _loadStatistics();
+      });
     }
   }
 
-  Widget _buildPrintableFacture({
-    required String? clientNom,
-    required String? adresse,
-    required String? magasinAdresse,
-    required String vendeurNom,
-    required List<Map<String, dynamic>> items,
-    required double sousTotal,
-    required double ristourne,
-    required double total,
-    required double montantPaye,
-    required double resteAPayer,
-    required double? montantRemis,
-    required double? monnaie,
-    required String numero,
-    required DateTime date,
-  }) {
-    final formatter = NumberFormat('#,##0.00', 'fr_FR');
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24.0),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.black, width: 2.0),
-        borderRadius: BorderRadius.circular(8.0),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            height: 60,
-            width: 120,
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey),
-              borderRadius: BorderRadius.circular(4.0),
-            ),
-            child: const Center(
-              child: Text('Logo', style: TextStyle(color: Colors.grey)),
-            ),
-          ),
-          const SizedBox(height: 16.0),
-          const Center(
-            child: Text(
-              'FACTURE',
-              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
-            ),
-          ),
-          const SizedBox(height: 24.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Adresse Fournisseur:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      magasinAdresse ?? 'Non spécifié',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 16.0),
-                    Text('Numéro: $numero', overflow: TextOverflow.ellipsis),
-                    Text(
-                      'Date: ${date.toString().substring(0, 10)}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      'Client:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'Nom: ${clientNom ?? '............................'}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      'Adresse: ${adresse ?? 'Non spécifiée'}',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 16.0),
-                    Text(
-                      'Vendeur: $vendeurNom',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24.0),
-          const Text(
-            'Articles:',
-            style: TextStyle(fontWeight: FontWeight.bold),
-          ),
-          Table(
-            border: TableBorder.all(color: Colors.black),
-            columnWidths: const {
-              0: FlexColumnWidth(3),
-              1: FlexColumnWidth(1),
-              2: FlexColumnWidth(1),
-              3: FlexColumnWidth(1),
-            },
-            children: [
-              TableRow(
-                decoration: BoxDecoration(color: Colors.grey.shade200),
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Description',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Qté',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Prix Unitaire',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.all(8.0),
-                    child: Text(
-                      'Total',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ],
-              ),
-              ...items.map((item) {
-                final quantite = (item['quantite'] as num?)?.toInt() ?? 0;
-                final prixUnitaire =
-                    (item['prixUnitaire'] as num?)?.toDouble() ?? 0.0;
-                return TableRow(
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        '${item['produitNom']} (${item['unite']})',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text('$quantite'),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        '${formatter.format(prixUnitaire)} FCFA',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(8.0),
-                      child: Text(
-                        '${formatter.format(quantite * prixUnitaire)} FCFA',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                );
-              }),
-            ],
-          ),
-          const SizedBox(height: 24.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.end,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    'Sous-total: ${formatter.format(sousTotal)} FCFA',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'Ristourne: ${formatter.format(ristourne)} FCFA',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'Total: ${formatter.format(total)} FCFA',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  Text(
-                    'Payé: ${formatter.format(montantPaye)} FCFA',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  if (montantRemis != null)
-                    Text(
-                      'Montant remis: ${formatter.format(montantRemis)} FCFA',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  if (monnaie != null && monnaie > 0)
-                    Text(
-                      'Monnaie: ${formatter.format(monnaie)} FCFA',
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  Text(
-                    'Reste à payer: ${formatter.format(resteAPayer >= 0 ? resteAPayer : 0)} FCFA',
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ),
-            ],
-          ),
-          const SizedBox(height: 32.0),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  const Text(
-                    'Signature du Client',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 8.0),
-                  Container(
-                    width: 200,
-                    child: CustomPaint(
-                      painter: DottedLinePainter(),
-                      size: Size(200, 2),
-                    ),
-                  ),
-                ],
-              ),
-              Row(
-                children: [
-                  const Text(
-                    'Signature du Vendeur',
-                    style: TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 8.0),
-                  Container(
-                    width: 200,
-                    child: CustomPaint(
-                      painter: DottedLinePainter(),
-                      size: Size(200, 2),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
-      ),
+  Future<void> _selectDateRange(BuildContext context) async {
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      initialDateRange: _startDate != null && _endDate != null
+          ? DateTimeRange(start: _startDate!, end: _endDate!)
+          : null,
     );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked.start;
+        _endDate = picked.end;
+        _selectedDay = null;
+        _facturesFuture = DatabaseHelper.getFactures(
+          includeArchived: true,
+          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+        );
+        _loadStatistics();
+      });
+    }
+  }
+
+  Future<void> _loadLogoPath() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _logoPath = prefs.getString('logo_path');
+    });
+  }
+
+  Future<void> _pickLogo(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(type: FileType.image);
+    if (result != null && result.files.single.path != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('logo_path', result.files.single.path!);
+      setState(() {
+        _logoPath = result.files.single.path!;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Logo enregistré !')),
+      );
+    }
   }
 
   @override
@@ -1823,20 +812,83 @@ class _SalesScreenState extends State<SalesScreen>
           Container(
             margin: const EdgeInsets.all(8.0),
             child: ElevatedButton.icon(
-              onPressed: _showAddFactureDialog,
+              onPressed: () {
+                final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+                FactureDialog.showAddFactureDialog(
+                  context,
+                  () {
+                    setState(() {
+                      _facturesFuture = DatabaseHelper.getFactures(
+                        includeArchived: true,
+                        vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+                      );
+                      _loadVendors();
+                      _loadStatistics();
+                    });
+                  },
+                  vendeurNom: user?.name,
+                );
+              },
               icon: const Icon(Icons.add),
               label: const Text('Nouvelle Facture'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: theme.primaryColor,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 padding: const EdgeInsets.symmetric(horizontal: 16),
               ),
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.print),
+            tooltip: 'Exporter les statistiques en PDF',
+            onPressed: (_currentUser?.role == 'Vendeur') ? null : () {
+              _generateAndPrintPdf();
+            },
+          ),
         ],
+      ),
+      endDrawer: Drawer(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            DrawerHeader(
+              decoration: BoxDecoration(
+                color: theme.primaryColor,
+              ),
+              child: Text(
+                'Navigation',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            ListTile(
+              leading: Icon(Icons.receipt),
+              title: Text('Factures'),
+              selected: true,
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.inventory),
+              title: Text('Produits'),
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+            ListTile(
+              leading: Icon(Icons.dashboard),
+              title: Text('Tableau de bord'),
+              onTap: () {
+                Navigator.pop(context);
+              },
+            ),
+          ],
+        ),
       ),
       body: SafeArea(
         child: SingleChildScrollView(
@@ -1844,8 +896,10 @@ class _SalesScreenState extends State<SalesScreen>
             children: [
               _buildSearchAndFilters(),
               const SizedBox(height: 16),
+              _buildStatisticsSection(theme, isDarkMode, formatter),
+              const SizedBox(height: 16),
               SizedBox(
-                height: MediaQuery.of(context).size.height - 200,
+                height: MediaQuery.of(context).size.height - 400,
                 child: FutureBuilder<List<Facture>>(
                   key: _futureKey,
                   future: _facturesFuture,
@@ -1860,25 +914,17 @@ class _SalesScreenState extends State<SalesScreen>
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(
-                              Icons.error_outline,
-                              size: 64,
-                              color: Colors.red.shade300,
-                            ),
+                            Icon(Icons.error_outline, size: 64, color: Colors.red.shade300),
                             const SizedBox(height: 16),
                             Text(
                               'Erreur de chargement',
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                color: Colors.red.shade300,
-                              ),
+                              style: theme.textTheme.titleLarge?.copyWith(color: Colors.red.shade300),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 8),
                             Text(
                               snapshot.error.toString(),
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: Colors.grey.shade600,
-                              ),
+                              style: theme.textTheme.bodyMedium?.copyWith(color: Colors.grey.shade600),
                               textAlign: TextAlign.center,
                             ),
                             const SizedBox(height: 16),
@@ -1886,7 +932,10 @@ class _SalesScreenState extends State<SalesScreen>
                               onPressed: () {
                                 setState(() {
                                   _facturesFuture = DatabaseHelper.getFactures(
-                                      includeArchived: true);
+                                    includeArchived: true,
+                                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                                  );
+                                  _loadStatistics();
                                 });
                               },
                               child: const Text('Réessayer'),
@@ -1900,36 +949,43 @@ class _SalesScreenState extends State<SalesScreen>
                     print('Nombre de factures chargées: ${factures.length}');
                     final filteredFactures = factures.where((facture) {
                       final query = _searchQuery.toLowerCase();
-                      final matchesSearch =
-                          facture.numero.toLowerCase().contains(query) ||
-                              (facture.clientNom
-                                      ?.toLowerCase()
-                                      .contains(query) ??
-                                  false) ||
-                              (facture.vendeurNom
-                                      ?.toLowerCase()
-                                      .contains(query) ??
-                                  false);
-                      if (_selectedFilter == 'Toutes') return matchesSearch;
-                      if (_selectedFilter == 'Payées')
-                        return matchesSearch &&
-                            facture.statutPaiement == 'Payé';
-                      if (_selectedFilter == 'En attente')
-                        return matchesSearch &&
-                            facture.statutPaiement == 'En attente';
-                      if (_selectedFilter == 'Annulées')
-                        return matchesSearch && facture.statut == 'Annulée';
-                      if (_selectedFilter == 'Ce mois') {
+                      final matchesSearch = facture.numero.toLowerCase().contains(query) ||
+                          (facture.clientNom?.toLowerCase().contains(query) ?? false) ||
+                          (facture.vendeurNom?.toLowerCase().contains(query) ?? false);
+                      bool matchesFilter = true;
+                      if (_selectedFilter == 'Payées') {
+                        matchesFilter = facture.statutPaiement == 'Payé';
+                      } else if (_selectedFilter == 'En attente') {
+                        matchesFilter = facture.statutPaiement == 'En attente';
+                      } else if (_selectedFilter == 'Annulées') {
+                        matchesFilter = facture.statut == 'Annulée';
+                      } else if (_selectedFilter == 'Ce mois') {
                         final now = DateTime.now();
-                        return matchesSearch &&
-                            facture.date.year == now.year &&
-                            facture.date.month == now.month;
+                        matchesFilter = facture.date.year == now.year && facture.date.month == now.month;
                       }
-                      return matchesSearch;
+                      bool matchesDate = true;
+                      if (_selectedDay != null) {
+                        matchesDate = facture.date.year == _selectedDay!.year &&
+                            facture.date.month == _selectedDay!.month &&
+                            facture.date.day == _selectedDay!.day;
+                      } else if (_startDate != null && _endDate != null) {
+                        matchesDate = facture.date.isAfter(_startDate!.subtract(const Duration(days: 1))) &&
+                            facture.date.isBefore(_endDate!.add(const Duration(days: 1)));
+                      }
+                      bool matchesVendor = true;
+                      if (_selectedVendor != null && _selectedVendor!.isNotEmpty) {
+                        matchesVendor = facture.vendeurNom == _selectedVendor;
+                      }
+                      return matchesSearch && matchesFilter && matchesDate && matchesVendor;
                     }).toList();
-                    print(
-                      'Nombre de factures filtrées: ${filteredFactures.length}',
-                    );
+
+                    if (_sortOrder == 'ascending') {
+                      filteredFactures.sort((a, b) => a.date.compareTo(b.date));
+                    } else if (_sortOrder == 'descending') {
+                      filteredFactures.sort((a, b) => b.date.compareTo(a.date));
+                    }
+
+                    print('Nombre de factures filtrées: ${filteredFactures.length}');
 
                     if (filteredFactures.isEmpty) {
                       return Center(
@@ -1940,9 +996,7 @@ class _SalesScreenState extends State<SalesScreen>
                               Icon(
                                 Icons.receipt_long_outlined,
                                 size: 64,
-                                color: isDarkMode
-                                    ? Colors.grey.shade400
-                                    : Colors.grey.shade600,
+                                color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
                               ),
                               const SizedBox(height: 16),
                               Text(
@@ -1952,27 +1006,43 @@ class _SalesScreenState extends State<SalesScreen>
                                         ? 'Aucune facture pour le filtre "$_selectedFilter"'
                                         : 'Aucune facture disponible',
                                 style: theme.textTheme.titleLarge?.copyWith(
-                                  color: isDarkMode
-                                      ? Colors.grey.shade400
-                                      : Colors.grey.shade600,
+                                  color: isDarkMode ? Colors.grey.shade400 : Colors.grey.shade600,
                                 ),
                                 textAlign: TextAlign.center,
                               ),
                               const SizedBox(height: 8),
                               ElevatedButton.icon(
-                                onPressed: _showAddFactureDialog,
+                                onPressed: () {
+                                  final user = Provider.of<AuthProvider>(context, listen: false).currentUser;
+                                  FactureDialog.showAddFactureDialog(
+                                    context,
+                                    () {
+                                      setState(() {
+                                        _facturesFuture = DatabaseHelper.getFactures(
+                                          includeArchived: true,
+                                          vendeurNom: (user != null && user.role == 'Vendeur') ? user.name : null,
+                                        );
+                                        _loadVendors();
+                                        _loadStatistics();
+                                      });
+                                    },
+                                    vendeurNom: user?.name,
+                                  );
+                                },
                                 icon: const Icon(Icons.add),
                                 label: const Text('Créer une facture'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: theme.primaryColor,
                                   foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
                               ),
                               if (_selectedFilter != 'Toutes' ||
-                                  _searchQuery.isNotEmpty)
+                                  _searchQuery.isNotEmpty ||
+                                  _selectedDay != null ||
+                                  _startDate != null ||
+                                  _selectedVendor != null ||
+                                  _sortOrder != null)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 8.0),
                                   child: TextButton(
@@ -1980,13 +1050,19 @@ class _SalesScreenState extends State<SalesScreen>
                                       setState(() {
                                         _searchQuery = '';
                                         _selectedFilter = 'Toutes';
-                                        _facturesFuture = DatabaseHelper
-                                            .getFactures(includeArchived: true);
+                                        _selectedDay = null;
+                                        _startDate = null;
+                                        _endDate = null;
+                                        _selectedVendor = null;
+                                        _sortOrder = null;
+                                        _facturesFuture = DatabaseHelper.getFactures(
+                                          includeArchived: true,
+                                          vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                                        );
+                                        _loadStatistics();
                                       });
                                     },
-                                    child: const Text(
-                                      'Réinitialiser filtre et recherche',
-                                    ),
+                                    child: const Text('Réinitialiser tous les filtres'),
                                   ),
                                 ),
                             ],
@@ -2005,8 +1081,7 @@ class _SalesScreenState extends State<SalesScreen>
                       itemCount: filteredFactures.length,
                       itemBuilder: (context, index) {
                         final facture = filteredFactures[index];
-                        final resteAPayer =
-                            facture.total - (facture.montantPaye ?? 0.0);
+                        final resteAPayer = facture.total - (facture.montantPaye ?? 0.0);
                         return _buildFactureCard(
                           facture: facture,
                           resteAPayer: resteAPayer,
@@ -2033,34 +1108,49 @@ class _SalesScreenState extends State<SalesScreen>
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2)),
         ],
       ),
       child: Column(
         children: [
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              ElevatedButton.icon(
+                icon: const Icon(Icons.image),
+                label: const Text('Choisir un logo'),
+                onPressed: () => _pickLogo(context),
+              ),
+              if (_logoPath != null)
+                Padding(
+                  padding: const EdgeInsets.only(left: 8.0),
+                  child: Image.file(
+                    File(_logoPath!),
+                    height: 32,
+                    width: 32,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
           TextField(
             onChanged: (value) {
               setState(() {
                 _searchQuery = value;
-                _facturesFuture =
-                    DatabaseHelper.getFactures(includeArchived: true);
+                _facturesFuture = DatabaseHelper.getFactures(
+                  includeArchived: true,
+                  vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                );
               });
             },
             decoration: InputDecoration(
               hintText: 'Rechercher une facture...',
               prefixIcon: const Icon(Icons.search),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               filled: true,
-              fillColor:
-                  Theme.of(context).brightness == Brightness.dark
-                      ? Colors.grey.shade800
-                      : Colors.grey.shade100,
+              fillColor: Theme.of(context).brightness == Brightness.dark ? Colors.grey.shade800 : Colors.grey.shade100,
             ),
           ),
           const SizedBox(height: 16),
@@ -2080,6 +1170,129 @@ class _SalesScreenState extends State<SalesScreen>
               ],
             ),
           ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _selectDay(context),
+                  icon: const Icon(Icons.calendar_today),
+                  label: Text(
+                    _selectedDay == null
+                        ? 'Choisir un jour'
+                        : DateFormat('dd/MM/yyyy').format(_selectedDay!),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _selectedDay != null ? Theme.of(context).primaryColor : null,
+                    foregroundColor: _selectedDay != null ? Colors.white : null,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => _selectDateRange(context),
+                  icon: const Icon(Icons.date_range),
+                  label: Text(
+                    _startDate == null || _endDate == null
+                        ? 'Choisir une période'
+                        : '${DateFormat('dd/MM').format(_startDate!)} - ${DateFormat('dd/MM').format(_endDate!)}',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _startDate != null && _endDate != null ? Theme.of(context).primaryColor : null,
+                    foregroundColor: _startDate != null && _endDate != null ? Colors.white : null,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (!(_currentUser != null && _currentUser!.role == 'Vendeur')) ...[
+            DropdownButton<String>(
+              hint: const Text('Sélectionner un vendeur'),
+              value: _selectedVendor,
+              isExpanded: true,
+              items: [
+                const DropdownMenuItem<String>(
+                  value: null,
+                  child: Text('Tous les vendeurs'),
+                ),
+                ..._vendors.map((vendor) => DropdownMenuItem<String>(
+                      value: vendor,
+                      child: Text(vendor),
+                    )),
+              ],
+              onChanged: (value) {
+                setState(() {
+                  _selectedVendor = value;
+                  _facturesFuture = DatabaseHelper.getFactures(
+                    includeArchived: true,
+                    vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                  );
+                  _loadStatistics();
+                });
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+          if (_selectedDay != null ||
+              _startDate != null ||
+              _endDate != null ||
+              _selectedVendor != null ||
+              _searchQuery.isNotEmpty ||
+              _selectedFilter != 'Toutes' ||
+              _sortOrder != null)
+            Align(
+              alignment: Alignment.centerRight,
+              child: TextButton.icon(
+                icon: Icon(Icons.clear),
+                label: Text('Réinitialiser les filtres'),
+                onPressed: () {
+                  setState(() {
+                    _searchQuery = '';
+                    _selectedFilter = 'Toutes';
+                    _selectedDay = null;
+                    _startDate = null;
+                    _endDate = null;
+                    _selectedVendor = null;
+                    _sortOrder = null;
+                    _facturesFuture = DatabaseHelper.getFactures(
+                      includeArchived: true,
+                      vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                    );
+                    _loadStatistics();
+                  });
+                },
+              ),
+            ),
+          DropdownButton<String>(
+            hint: const Text('Trier par date'),
+            value: _sortOrder,
+            isExpanded: true,
+            items: [
+              const DropdownMenuItem<String>(
+                value: null,
+                child: Text('Aucun tri'),
+              ),
+              const DropdownMenuItem<String>(
+                value: 'ascending',
+                child: Text('Croissant (plus ancien)'),
+              ),
+              const DropdownMenuItem<String>(
+                value: 'descending',
+                child: Text('Décroissant (plus récent)'),
+              ),
+            ],
+            onChanged: (value) {
+              setState(() {
+                _sortOrder = value;
+                _facturesFuture = DatabaseHelper.getFactures(
+                  includeArchived: true,
+                  vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+                );
+              });
+            },
+          ),
         ],
       ),
     );
@@ -2092,7 +1305,11 @@ class _SalesScreenState extends State<SalesScreen>
       onSelected: (bool selected) {
         setState(() {
           _selectedFilter = selected ? label : 'Toutes';
-          _facturesFuture = DatabaseHelper.getFactures(includeArchived: true);
+          _facturesFuture = DatabaseHelper.getFactures(
+            includeArchived: true,
+            vendeurNom: (_currentUser != null && _currentUser!.role == 'Vendeur') ? _currentUser!.name : null,
+          );
+          _loadStatistics();
         });
       },
       backgroundColor: Theme.of(context).primaryColor.withOpacity(0.1),
@@ -2118,9 +1335,7 @@ class _SalesScreenState extends State<SalesScreen>
       elevation: 0,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200,
-        ),
+        side: BorderSide(color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200),
       ),
       child: InkWell(
         onTap: () => _showFactureDetails(facture),
@@ -2143,9 +1358,7 @@ class _SalesScreenState extends State<SalesScreen>
                               'Facture ${facture.numero}',
                               style: theme.textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.bold,
-                                color: facture.statut == 'Annulée'
-                                    ? Colors.red
-                                    : null,
+                                color: facture.statut == 'Annulée' ? Colors.red : null,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -2165,23 +1378,14 @@ class _SalesScreenState extends State<SalesScreen>
                     ),
                   ),
                   Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: statusColor.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Text(
-                      facture.statut == 'Annulée'
-                          ? 'Annulée'
-                          : facture.statutPaiement,
-                      style: TextStyle(
-                        color: statusColor,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                      ),
+                      facture.statut == 'Annulée' ? 'Annulée' : facture.statutPaiement,
+                      style: TextStyle(color: statusColor, fontWeight: FontWeight.bold, fontSize: 12),
                     ),
                   ),
                 ],
@@ -2199,12 +1403,15 @@ class _SalesScreenState extends State<SalesScreen>
                           style: theme.textTheme.bodyMedium,
                           overflow: TextOverflow.ellipsis,
                         ),
+                        Text(
+                          'Vendeur: ${facture.vendeurNom ?? 'Non spécifié'}',
+                          style: theme.textTheme.bodyMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                         const SizedBox(height: 4),
                         Text(
                           'Total: ${formatter.format(facture.total)} FCFA',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -2226,31 +1433,28 @@ class _SalesScreenState extends State<SalesScreen>
                             ''',
                               [facture.bonCommandeId],
                             );
-                            _showPrintOptions(
+                            FactureDialog.showPrintOptions(
+                              context: context,
                               numero: facture.numero,
                               date: facture.date,
                               clientNom: facture.clientNom,
                               adresse: facture.adresse,
                               magasinAdresse: facture.magasinAdresse,
-                              vendeurNom: facture.vendeurNom ?? 'Admin',
+                              vendeurNom: facture.vendeurNom ?? 'Non spécifié',
                               items: items
-                                  .map(
-                                    (item) => {
-                                      'produitId': item['produitId'],
-                                      'produitNom': item['produitNom'],
-                                      'quantite': item['quantite'],
-                                      'prixUnitaire': item['prixUnitaire'],
-                                      'unite': item['unite'],
-                                    },
-                                  )
+                                  .map((item) => {
+                                        'produitId': item['produitId'],
+                                        'produitNom': item['produitNom'],
+                                        'quantite': item['quantite'],
+                                        'prixUnitaire': item['prixUnitaire'],
+                                        'unite': item['unite'],
+                                      })
                                   .toList(),
-                              sousTotal:
-                                  facture.total + (facture.ristourne ?? 0.0),
+                              sousTotal: facture.total + (facture.ristourne ?? 0.0),
                               ristourne: facture.ristourne ?? 0.0,
                               total: facture.total,
                               montantPaye: facture.montantPaye ?? 0.0,
-                              resteAPayer:
-                                  facture.total - (facture.montantPaye ?? 0.0),
+                              resteAPayer: facture.total - (facture.montantPaye ?? 0.0),
                               montantRemis: facture.montantRemis,
                               monnaie: facture.monnaie,
                             );
@@ -2259,8 +1463,7 @@ class _SalesScreenState extends State<SalesScreen>
                         ),
                         if (resteAPayer > 0)
                           IconButton(
-                            icon:
-                                Icon(Icons.payment, color: theme.primaryColor),
+                            icon: Icon(Icons.payment, color: theme.primaryColor),
                             onPressed: () => _showAddPaymentDialog(facture),
                             tooltip: 'Ajouter un paiement',
                           ),
@@ -2282,38 +1485,171 @@ class _SalesScreenState extends State<SalesScreen>
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text('$label:', style: const TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(
-            child: Text(
-              value,
-              textAlign: TextAlign.end,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
+          Expanded(child: Text(value, textAlign: TextAlign.end, overflow: TextOverflow.ellipsis)),
         ],
       ),
     );
   }
-}
 
-class DottedLinePainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.black
-      ..strokeWidth = 2
-      ..strokeCap = StrokeCap.square;
-
-    const dashWidth = 5;
-    const dashSpace = 5;
-    double startX = 0;
-
-    while (startX < size.width) {
-      canvas.drawLine(
-          Offset(startX, 0), Offset(startX + dashWidth, 0), paint);
-      startX += dashWidth + dashSpace;
+  Widget _buildStatisticsSection(ThemeData theme, bool isDarkMode, NumberFormat formatter) {
+    String _safeTruncate(String text, int maxLength) {
+      return text.length <= maxLength ? text : text.substring(0, maxLength);
     }
-  }
 
-  @override
-  bool shouldRepaint(CustomPainter oldDelegate) => false;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: theme.cardColor,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: _isLoadingStats
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Statistiques des Ventes',
+                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.print, color: (_currentUser?.role == 'Vendeur') ? theme.disabledColor : theme.primaryColor),
+                      onPressed: (_currentUser?.role == 'Vendeur') ? null : _generateAndPrintPdf,
+                      tooltip: (_currentUser?.role == 'Vendeur')
+                          ? 'Export désactivé pour les vendeurs'
+                          : 'Exporter les statistiques en PDF',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: ListTile(
+                    leading: Icon(Icons.monetization_on, color: theme.primaryColor),
+                    title: Text('Chiffre d\'Affaires Total', style: TextStyle(fontWeight: FontWeight.bold)),
+                    subtitle: Text('${formatter.format(_totalCA)}\u00A0FCFA'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Ventes par Produit', style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 200,
+                          child: _salesByProduct.isEmpty
+                              ? Center(child: Text('Aucune donnée disponible'))
+                              : BarChart(
+                                  BarChartData(
+                                    barGroups: _salesByProduct.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final sale = entry.value;
+                                      return BarChartGroupData(
+                                        x: index,
+                                        barRods: [
+                                          BarChartRodData(
+                                            toY: sale['totalQuantite'].toDouble(),
+                                            color: theme.primaryColor,
+                                            width: 10,
+                                          ),
+                                        ],
+                                      );
+                                    }).toList(),
+                                    titlesData: FlTitlesData(
+                                      bottomTitles: AxisTitles(
+                                        sideTitles: SideTitles(
+                                          showTitles: true,
+                                          getTitlesWidget: (value, meta) {
+                                            final index = value.toInt();
+                                            if (index >= _salesByProduct.length) return Text('');
+                                            return Padding(
+                                              padding: const EdgeInsets.only(top: 8),
+                                              child: Text(
+                                                _safeTruncate(_salesByProduct[index]['nom'].toString(), 5),
+                                                style: TextStyle(fontSize: 10),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+                                      leftTitles: AxisTitles(
+                                        sideTitles: SideTitles(showTitles: true, reservedSize: 40),
+                                      ),
+                                      topTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                      rightTitles: AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                    ),
+                                    borderData: FlBorderData(show: false),
+                                    gridData: FlGridData(show: false),
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(height: 16),
+                        ..._salesByProduct.map((sale) => ListTile(
+                              title: Text(sale['nom']),
+                              subtitle: Text(
+                                  'Quantité: ${sale['totalQuantite']} ${sale['unite']} | CA: ${formatter.format(sale['totalCA'])}\u00A0FCFA'),
+                            )),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('Ventes par Vendeur', style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          height: 200,
+                          child: _salesByVendor.isEmpty
+                              ? Center(child: Text('Aucune donnée disponible'))
+                              : PieChart(
+                                  PieChartData(
+                                    sections: _salesByVendor.asMap().entries.map((entry) {
+                                      final index = entry.key;
+                                      final sale = entry.value;
+                                      return PieChartSectionData(
+                                        value: sale['totalCA'].toDouble(),
+                                        title: _safeTruncate(sale['vendeurNom'].toString(), 5),
+                                        color: Colors.primaries[index % Colors.primaries.length],
+                                        radius: 80,
+                                        titleStyle: TextStyle(fontSize: 12, color: Colors.white),
+                                      );
+                                    }).toList(),
+                                    sectionsSpace: 2,
+                                    centerSpaceRadius: 40,
+                                  ),
+                                ),
+                        ),
+                        const SizedBox(height: 16),
+                        ..._salesByVendor.map((sale) => ListTile(
+                              title: Text(sale['vendeurNom']),
+                              subtitle: Text(
+                                  'Factures: ${sale['invoiceCount']} | CA: ${formatter.format(sale['totalCA'])}\u00A0FCFA'),
+                            )),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+    );
+  }
 }

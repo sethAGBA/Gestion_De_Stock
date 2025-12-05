@@ -12,7 +12,7 @@ class AlertsScreen extends StatefulWidget {
 }
 
 class _AlertsScreenState extends State<AlertsScreen> {
-  late Database _database;
+  Database? _database;
   String _selectedFilter = 'all'; // 'all', 'damaged', 'low_stock'
   final _searchController = TextEditingController();
   final _numberFormat = NumberFormat("#,##0", "fr_FR");
@@ -20,25 +20,30 @@ class _AlertsScreenState extends State<AlertsScreen> {
   @override
   void initState() {
     super.initState();
-    _initDatabase();
+    _ensureDatabase();
   }
 
   @override
   void dispose() {
     _searchController.dispose();
-    _database.close();
+    _database?.close();
     super.dispose();
   }
 
-  Future<void> _initDatabase() async {
+  Future<Database> _ensureDatabase() async {
+    if (_database != null && _database!.isOpen) {
+      return _database!;
+    }
     _database = await openDatabase(
       path.join(await getDatabasesPath(), 'dashboard.db'),
     );
+    return _database!;
   }
 
   Future<List<Produit>> _getDamagedProducts() async {
     try {
-      final maps = await _database.query(
+      final db = await _ensureDatabase();
+      final maps = await db.query(
         'produits',
         where: 'quantiteAvariee > ?',
         whereArgs: [0],
@@ -52,7 +57,8 @@ class _AlertsScreenState extends State<AlertsScreen> {
 
   Future<List<Produit>> _getLowStockProducts() async {
     try {
-      final maps = await _database.query(
+      final db = await _ensureDatabase();
+      final maps = await db.query(
         'produits',
         where: 'quantiteStock <= seuilAlerte AND statut != ?',
         whereArgs: ['arrêté'],

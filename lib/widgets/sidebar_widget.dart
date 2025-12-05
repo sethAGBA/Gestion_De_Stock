@@ -1,10 +1,14 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../constants/screen_permissions.dart';
+
 class SidebarWidget extends StatefulWidget {
   final Function(int)? onItemTapped;
+  final int selectedIndex;
+  final Set<String> allowedKeys;
 
-  const SidebarWidget({Key? key, this.onItemTapped}) : super(key: key);
+  const SidebarWidget({Key? key, this.onItemTapped, required this.selectedIndex, required this.allowedKeys}) : super(key: key);
 
   @override
   _SidebarWidgetState createState() => _SidebarWidgetState();
@@ -31,9 +35,9 @@ class _SidebarWidgetState extends State<SidebarWidget> {
         children: [
           Padding(
             padding: EdgeInsets.fromLTRB(
-              isVerySmallScreen || !_isExpanded ? 8.0 : 16.0,
+              isVerySmallScreen || !_isExpanded ? 8.0 : 12.0,
               24.0,
-              isVerySmallScreen || !_isExpanded ? 8.0 : 16.0,
+              isVerySmallScreen || !_isExpanded ? 8.0 : 12.0,
               32.0,
             ),
             child: Row(
@@ -45,13 +49,18 @@ class _SidebarWidgetState extends State<SidebarWidget> {
                   size: isVerySmallScreen || !_isExpanded ? 24.0 : 28.0,
                 ),
                 if (!isVerySmallScreen && _isExpanded) ...[
-                  const SizedBox(width: 12.0),
-                  const Text(
-                    'GESTION DE STOCK',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18.0,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(width: 8.0),
+                  const Expanded(
+                    child: Text(
+                      'GESTION DE STOCK',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      softWrap: false,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18.0,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -73,76 +82,33 @@ class _SidebarWidgetState extends State<SidebarWidget> {
           Expanded(
             child: ListView(
               children: [
-                _buildMenuItem(
-                  icon: Icons.dashboard,
-                  title: 'Tableau de bord',
-                  index: 0,
-                  isSelected: true,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.list_alt_outlined,
-                  title: 'Produits',
-                  index: 1,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.input,
-                  title: 'Entrées',
-                  index: 2,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.output,
-                  title: 'Sorties',
-                  index: 3,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.folder_open_outlined,
-                  title: 'Inventaire',
-                  index: 4,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.business,
-                  title: 'Fournisseurs',
-                  index: 5,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.people,
-                  title: 'Utilisateurs',
-                  index: 6,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.account_balance_outlined,
-                  title: 'Gestion des ventes et des clients',
-                  index: 7,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.notifications,
-                  title: 'Alertes',
-                  index: 8,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
-                _buildMenuItem(
-                  icon: Icons.history,
-                  title: 'Historique des avaries',
-                  index: 10,
-                  isExpanded: !isVerySmallScreen && _isExpanded,
-                ),
+                for (final entry in appScreenPermissions.asMap().entries)
+                  if (entry.value.key != 'settings')
+                    _buildMenuItem(
+                      icon: entry.value.icon,
+                      title: entry.value.label,
+                      index: entry.key,
+                      isSelected: widget.selectedIndex == entry.key,
+                      isExpanded: !isVerySmallScreen && _isExpanded,
+                      enabled: widget.allowedKeys.contains(entry.value.key),
+                    ),
               ],
             ),
           ),
-          _buildMenuItem(
-            icon: Icons.settings,
-            title: 'Paramètres',
-            index: 9,
-            isExpanded: !isVerySmallScreen && _isExpanded,
-          ),
+          Builder(builder: (context) {
+            final settingsIndex = appScreenPermissions.indexWhere((item) => item.key == 'settings');
+            if (settingsIndex == -1) {
+              return const SizedBox.shrink();
+            }
+            return _buildMenuItem(
+              icon: Icons.settings,
+              title: 'Paramètres',
+              index: settingsIndex,
+              isSelected: widget.selectedIndex == settingsIndex,
+              isExpanded: !isVerySmallScreen && _isExpanded,
+              enabled: widget.allowedKeys.contains('settings'),
+            );
+          }),
         ],
       ),
     );
@@ -152,6 +118,7 @@ class _SidebarWidgetState extends State<SidebarWidget> {
     required IconData icon,
     required String title,
     required int index,
+    required bool enabled,
     bool isSelected = false,
     required bool isExpanded,
   }) {
@@ -162,22 +129,35 @@ class _SidebarWidgetState extends State<SidebarWidget> {
         borderRadius: BorderRadius.circular(8.0),
       ),
       child: ListTile(
-        leading: Icon(icon, color: Colors.white),
+        leading: Icon(
+          icon,
+          color: enabled ? Colors.white : Colors.white.withOpacity(0.4),
+        ),
+        minLeadingWidth: isExpanded ? 40.0 : 0.0,
+        contentPadding: EdgeInsets.symmetric(horizontal: isExpanded ? 16.0 : 8.0),
         title: isExpanded
             ? Text(
                 title,
-                style: const TextStyle(color: Colors.white),
+                style: TextStyle(color: enabled ? Colors.white : Colors.white.withOpacity(0.4)),
               )
             : null,
         selected: isSelected,
+        enabled: enabled,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8.0),
         ),
         onTap: () {
-          if (widget.onItemTapped != null) {
+          if (widget.onItemTapped != null && enabled) {
             widget.onItemTapped!(index);
           }
         },
+        trailing: !enabled && isExpanded
+            ? const Icon(
+                Icons.lock_outline,
+                color: Colors.white,
+                size: 16,
+              )
+            : null,
       ),
     );
   }

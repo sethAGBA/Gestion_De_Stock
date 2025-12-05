@@ -9,7 +9,10 @@ class Variante {
   Map<String, dynamic> toMap() => {'type': type, 'valeur': valeur};
 
   factory Variante.fromMap(Map<String, dynamic> map) {
-    return Variante(type: map['type'] as String, valeur: map['valeur'] as String);
+    return Variante(
+      type: map['type'] as String? ?? 'N/A',
+      valeur: map['valeur'] as String? ?? 'N/A',
+    );
   }
 }
 
@@ -22,15 +25,27 @@ class Produit {
   final String? imageUrl;
   final String? sku;
   final String? codeBarres;
+  final String? dci;
+  final String? forme;
+  final String? dosage;
+  final String? conditionnement;
+  final String? cip;
+  final String? fabricant;
   final String unite;
-  final int quantiteStock;
-  final int quantiteAvariee;
-  final int stockMin;
-  final int stockMax;
-  final int seuilAlerte;
+  final String? conditionnementLabel;
+  final double conditionnementQuantite;
+  final double prixConditionnement;
+  final double quantiteStock;
+  final double quantiteAvariee;
+  final double quantiteInitiale;
+  final double stockMin;
+  final double stockMax;
+  final double seuilAlerte;
   final List<Variante> variantes;
   final double prixAchat;
   final double prixVente;
+  final double prixVenteGros;
+  final double seuilGros;
   final double tva;
   final String? fournisseurPrincipal;
   final List<String> fournisseursSecondaires;
@@ -47,15 +62,27 @@ class Produit {
     this.imageUrl,
     this.sku,
     this.codeBarres,
+    this.dci,
+    this.forme,
+    this.dosage,
+    this.conditionnement,
+    this.cip,
+    this.fabricant,
     required this.unite,
+    this.conditionnementLabel,
+    this.conditionnementQuantite = 0.0,
+    this.prixConditionnement = 0.0,
     required this.quantiteStock,
     required this.quantiteAvariee,
+    required this.quantiteInitiale,
     required this.stockMin,
     required this.stockMax,
     required this.seuilAlerte,
     required this.variantes,
     required this.prixAchat,
     required this.prixVente,
+    this.prixVenteGros = 0.0,
+    this.seuilGros = 0.0,
     required this.tva,
     this.fournisseurPrincipal,
     required this.fournisseursSecondaires,
@@ -74,15 +101,27 @@ class Produit {
       'imageUrl': imageUrl,
       'sku': sku,
       'codeBarres': codeBarres,
+      'dci': dci,
+      'forme': forme,
+      'dosage': dosage,
+      'conditionnement': conditionnement,
+      'cip': cip,
+      'fabricant': fabricant,
       'unite': unite,
+      'conditionnementLabel': conditionnementLabel,
+      'conditionnementQuantite': conditionnementQuantite,
+      'prixConditionnement': prixConditionnement,
       'quantiteStock': quantiteStock,
       'quantiteAvariee': quantiteAvariee,
+      'quantiteInitiale': quantiteInitiale,
       'stockMin': stockMin,
       'stockMax': stockMax,
       'seuilAlerte': seuilAlerte,
       'variantes': jsonEncode(variantes.map((v) => v.toMap()).toList()),
       'prixAchat': prixAchat,
       'prixVente': prixVente,
+      'prixVenteGros': prixVenteGros,
+      'seuilGros': seuilGros,
       'tva': tva,
       'fournisseurPrincipal': fournisseurPrincipal,
       'fournisseursSecondaires': jsonEncode(fournisseursSecondaires),
@@ -102,25 +141,37 @@ class Produit {
       imageUrl: map['imageUrl'] as String?,
       sku: map['sku'] as String?,
       codeBarres: map['codeBarres'] as String?,
+      dci: map['dci'] as String?,
+      forme: map['forme'] as String?,
+      dosage: map['dosage'] as String?,
+      conditionnement: map['conditionnement'] as String?,
+      cip: map['cip'] as String?,
+      fabricant: map['fabricant'] as String?,
       unite: map['unite'] as String? ?? '',
-      quantiteStock: (map['quantiteStock'] as num?)?.toInt() ?? 0,
-      quantiteAvariee: (map['quantiteAvariee'] as num?)?.toInt() ?? 0,
-      stockMin: (map['stockMin'] as num?)?.toInt() ?? 0,
-      stockMax: (map['stockMax'] as num?)?.toInt() ?? 0,
-      seuilAlerte: (map['seuilAlerte'] as num?)?.toInt() ?? 0,
+      conditionnementLabel: map['conditionnementLabel'] as String?,
+      conditionnementQuantite: (map['conditionnementQuantite'] as num?)?.toDouble() ?? 0.0,
+      prixConditionnement: (map['prixConditionnement'] as num?)?.toDouble() ?? 0.0,
+      quantiteStock: (map['quantiteStock'] as num?)?.toDouble() ?? 0.0,
+      quantiteAvariee: (map['quantiteAvariee'] as num?)?.toDouble() ?? 0.0,
+      quantiteInitiale: (map['quantiteInitiale'] as num?)?.toDouble() ?? (map['quantiteStock'] as num?)?.toDouble() ?? 0.0,
+      stockMin: (map['stockMin'] as num?)?.toDouble() ?? 0.0,
+      stockMax: (map['stockMax'] as num?)?.toDouble() ?? 0.0,
+      seuilAlerte: (map['seuilAlerte'] as num?)?.toDouble() ?? 0.0,
       variantes: (jsonDecode(map['variantes'] as String? ?? '[]') as List<dynamic>)
           .map((v) => Variante.fromMap(v as Map<String, dynamic>))
           .toList(),
       prixAchat: (map['prixAchat'] as num?)?.toDouble() ?? 0.0,
       prixVente: (map['prixVente'] as num?)?.toDouble() ?? 0.0,
+      prixVenteGros: (map['prixVenteGros'] as num?)?.toDouble() ?? 0.0,
+      seuilGros: (map['seuilGros'] as num?)?.toDouble() ?? 0.0,
       tva: (map['tva'] as num?)?.toDouble() ?? 0.0,
       fournisseurPrincipal: map['fournisseurPrincipal'] as String?,
       fournisseursSecondaires: List<String>.from(jsonDecode(map['fournisseursSecondaires'] as String? ?? '[]')),
       derniereEntree: map['derniereEntree'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['derniereEntree'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['derniereEntree'] as num).toInt())
           : null,
       derniereSortie: map['derniereSortie'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['derniereSortie'] as int)
+          ? DateTime.fromMillisecondsSinceEpoch((map['derniereSortie'] as num).toInt())
           : null,
       statut: map['statut'] as String? ?? 'disponible',
     );
@@ -133,6 +184,10 @@ class Supplier {
   final String productName;
   final String category;
   final double price;
+  final String contact;
+  final String email;
+  final String telephone;
+  final String adresse;
 
   Supplier({
     required this.id,
@@ -140,6 +195,10 @@ class Supplier {
     required this.productName,
     required this.category,
     required this.price,
+    required this.contact,
+    required this.email,
+    required this.telephone,
+    required this.adresse,
   });
 
   Map<String, dynamic> toMap() {
@@ -149,6 +208,10 @@ class Supplier {
       'productName': productName,
       'category': category,
       'price': price,
+      'contact': contact,
+      'email': email,
+      'telephone': telephone,
+      'adresse': adresse,
     };
   }
 
@@ -159,6 +222,10 @@ class Supplier {
       productName: map['productName'] as String? ?? '',
       category: map['category'] as String? ?? '',
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
+      contact: map['contact'] as String? ?? '',
+      email: map['email'] as String? ?? '',
+      telephone: map['telephone'] as String? ?? '',
+      adresse: map['adresse'] as String? ?? '',
     );
   }
 }
@@ -168,13 +235,39 @@ class User {
   final String name;
   final String role;
   final String password;
+  final bool otpEnabled;
+  final String? otpSecret;
+  final List<String>? permissions;
 
   User({
     required this.id,
     required this.name,
     required this.role,
     required this.password,
+    this.otpEnabled = false,
+    this.otpSecret,
+    this.permissions,
   });
+
+  User copyWith({
+    int? id,
+    String? name,
+    String? role,
+    String? password,
+    bool? otpEnabled,
+    String? otpSecret,
+    List<String>? permissions,
+  }) {
+    return User(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      role: role ?? this.role,
+      password: password ?? this.password,
+      otpEnabled: otpEnabled ?? this.otpEnabled,
+      otpSecret: otpSecret ?? this.otpSecret,
+      permissions: permissions ?? this.permissions,
+    );
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -182,15 +275,31 @@ class User {
       'name': name,
       'role': role,
       'password': password,
+      'otpEnabled': otpEnabled ? 1 : 0,
+      'otpSecret': otpSecret,
+      'permissions': permissions == null ? null : jsonEncode(permissions),
     };
   }
 
   factory User.fromMap(Map<String, dynamic> map) {
+    List<String>? permissions;
+    final rawPermissions = map['permissions'];
+    if (rawPermissions is String && rawPermissions.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawPermissions) as List<dynamic>;
+        permissions = decoded.cast<String>();
+      } catch (_) {
+        permissions = null;
+      }
+    }
     return User(
       id: (map['id'] as num?)?.toInt() ?? 0,
       name: map['name'] as String? ?? '',
       role: map['role'] as String? ?? '',
       password: map['password'] as String? ?? '',
+      otpEnabled: ((map['otpEnabled'] as num?)?.toInt() ?? 0) == 1,
+      otpSecret: map['otpSecret'] as String?,
+      permissions: permissions,
     );
   }
 }
@@ -433,7 +542,7 @@ class FactureArchivee {
   Map<String, dynamic> toMap() {
     return {
       'id': id,
-      'facture_id': factureId,
+      'factureId': factureId,
       'numero': numero,
       'bonCommandeId': bonCommandeId,
       'clientId': clientId,
@@ -448,31 +557,31 @@ class FactureArchivee {
       'montantPaye': montantPaye,
       'montantRemis': montantRemis,
       'monnaie': monnaie,
-      'motif_annulation': motifAnnulation,
-      'date_annulation': dateAnnulation.millisecondsSinceEpoch,
+      'motifAnnulation': motifAnnulation,
+      'dateAnnulation': dateAnnulation.millisecondsSinceEpoch,
     };
   }
 
   factory FactureArchivee.fromMap(Map<String, dynamic> map) {
     return FactureArchivee(
-      id: map['id'] as int,
-      factureId: map['facture_id'] as int,
-      numero: map['numero'] as String,
-      bonCommandeId: map['bonCommandeId'] as int,
-      clientId: map['clientId'] as int,
+      id: (map['id'] as num?)?.toInt() ?? 0,
+      factureId: (map['factureId'] as num?)?.toInt() ?? 0,
+      numero: map['numero'] as String? ?? '',
+      bonCommandeId: (map['bonCommandeId'] as num?)?.toInt() ?? 0,
+      clientId: (map['clientId'] as num?)?.toInt() ?? 0,
       clientNom: map['clientNom'] as String?,
       adresse: map['adresse'] as String?,
       vendeurNom: map['vendeurNom'] as String?,
       magasinAdresse: map['magasinAdresse'] as String?,
       ristourne: (map['ristourne'] as num?)?.toDouble() ?? 0.0,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      total: (map['total'] as num).toDouble(),
-      statutPaiement: map['statutPaiement'] as String,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      total: (map['total'] as num?)?.toDouble() ?? 0.0,
+      statutPaiement: map['statutPaiement'] as String? ?? '',
       montantPaye: (map['montantPaye'] as num?)?.toDouble() ?? 0.0,
       montantRemis: (map['montantRemis'] as num?)?.toDouble(),
       monnaie: (map['monnaie'] as num?)?.toDouble(),
-      motifAnnulation: map['motif_annulation'] as String,
-      dateAnnulation: DateTime.fromMillisecondsSinceEpoch(map['date_annulation'] as int),
+      motifAnnulation: map['motifAnnulation'] as String? ?? '',
+      dateAnnulation: DateTime.fromMillisecondsSinceEpoch((map['dateAnnulation'] as num?)?.toInt() ?? 0),
     );
   }
 }
@@ -525,7 +634,7 @@ class DamagedAction {
   final int id;
   final int produitId;
   final String produitNom;
-  final int quantite;
+  final double quantite;
   final String action;
   final String utilisateur;
   final int date;
@@ -557,7 +666,7 @@ class DamagedAction {
       id: (map['id'] as num?)?.toInt() ?? 0,
       produitId: (map['produitId'] as num?)?.toInt() ?? 0,
       produitNom: map['produitNom'] as String? ?? 'Inconnu',
-      quantite: (map['quantite'] as num?)?.toInt() ?? 0,
+      quantite: (map['quantite'] as num?)?.toDouble() ?? 0.0,
       action: map['action'] as String? ?? '',
       utilisateur: map['utilisateur'] as String? ?? '',
       date: (map['date'] as num?)?.toInt() ?? 0,
@@ -588,14 +697,14 @@ class StockExit {
 
   factory StockExit.fromMap(Map<String, dynamic> map) {
     return StockExit(
-      id: map['id'] as int?,
-      produitId: map['produitId'] as int,
-      produitNom: map['produitNom'] as String,
-      quantite: map['quantite'] as int,
-      type: map['type'] as String,
+      id: (map['id'] as num?)?.toInt(),
+      produitId: (map['produitId'] as num?)?.toInt() ?? 0,
+      produitNom: map['produitNom'] as String? ?? '',
+      quantite: (map['quantite'] as num?)?.toInt() ?? 0,
+      type: map['type'] as String? ?? '',
       raison: map['raison'] as String?,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      utilisateur: map['utilisateur'] as String,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      utilisateur: map['utilisateur'] as String? ?? '',
     );
   }
 
@@ -636,14 +745,14 @@ class StockEntry {
 
   factory StockEntry.fromMap(Map<String, dynamic> map) {
     return StockEntry(
-      id: map['id'] as int?,
-      produitId: map['produitId'] as int,
-      produitNom: map['produitNom'] as String,
-      quantite: map['quantite'] as int,
-      type: map['type'] as String,
+      id: (map['id'] as num?)?.toInt(),
+      produitId: (map['produitId'] as num?)?.toInt() ?? 0,
+      produitNom: map['produitNom'] as String? ?? '',
+      quantite: (map['quantite'] as num?)?.toInt() ?? 0,
+      type: map['type'] as String? ?? '',
       source: map['source'] as String?,
-      date: DateTime.fromMillisecondsSinceEpoch(map['date'] as int),
-      utilisateur: map['utilisateur'] as String,
+      date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
+      utilisateur: map['utilisateur'] as String? ?? '',
     );
   }
 

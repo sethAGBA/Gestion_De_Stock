@@ -1,14 +1,30 @@
+import 'package:intl/intl.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart' as path;
+import 'package:stock_management/data/data_initializer.dart';
 import '../models/models.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 
 class DatabaseHelper {
   static Database? _database;
 
   static Future<Database> get database async {
-    if (_database != null) return _database!;
+    if (_database != null && await _isDatabaseOpen()) {
+      return _database!;
+    }
     _database = await _initDatabase();
     return _database!;
+  }
+
+  static Future<bool> _isDatabaseOpen() async {
+    try {
+      await _database!.rawQuery('SELECT 1');
+      return true;
+    } catch (e) {
+      print('Database is closed or inaccessible: $e');
+      return false;
+    }
   }
 
   static Future<Database> _initDatabase() async {
@@ -16,10 +32,27 @@ class DatabaseHelper {
     print('Initialisation de la base de données à : $pathDb');
     return await openDatabase(
       pathDb,
-      version: 14, // Incremented to 14 for password column
+      version: 24,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
+      onOpen: (db) async {
+        await ensureSupplierColumns(db);
+        await ensureUserOtpColumns(db);
+      },
     );
+  }
+
+  static Future<void> closeDatabase() async {
+    print('Database connection retained (closeDatabase called but ignored)');
+  }
+
+  static Future<int> _countAdministrators(Database db) async {
+    final result = await db.rawQuery(
+      'SELECT COUNT(*) as count FROM users WHERE role = ?',
+      ['Administrateur'],
+    );
+    final value = Sqflite.firstIntValue(result);
+    return value ?? 0;
   }
 
   static Future<void> _onCreate(Database db, int version) async {
@@ -35,14 +68,20 @@ class DatabaseHelper {
         sku TEXT,
         codeBarres TEXT,
         unite TEXT NOT NULL,
+        conditionnementLabel TEXT,
+        conditionnementQuantite REAL NOT NULL DEFAULT 0.0,
+        prixConditionnement REAL NOT NULL DEFAULT 0.0,
         quantiteStock INTEGER NOT NULL DEFAULT 0,
         quantiteAvariee INTEGER NOT NULL DEFAULT 0,
+        quantiteInitiale INTEGER NOT NULL DEFAULT 0,
         stockMin INTEGER NOT NULL DEFAULT 0,
         stockMax INTEGER NOT NULL DEFAULT 0,
         seuilAlerte INTEGER NOT NULL DEFAULT 0,
         variantes TEXT,
         prixAchat REAL NOT NULL DEFAULT 0.0,
         prixVente REAL NOT NULL DEFAULT 0.0,
+        prixVenteGros REAL NOT NULL DEFAULT 0.0,
+        seuilGros REAL NOT NULL DEFAULT 0.0,
         tva REAL NOT NULL DEFAULT 0.0,
         fournisseurPrincipal TEXT,
         fournisseursSecondaires TEXT,
@@ -51,39 +90,42 @@ class DatabaseHelper {
         statut TEXT NOT NULL
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS suppliers (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT NOT NULL,
         productName TEXT NOT NULL,
         category TEXT NOT NULL,
-        price REAL NOT NULL
+        price REAL NOT NULL,
+        contact TEXT,
+        email TEXT,
+        telephone TEXT,
+        adresse TEXT
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        password TEXT NOT NULL
+        name TEXT NOT NULL UNIQUE,
+        role TEXT NOT NULL CHECK(role IN ('Administrateur', 'Vendeur', 'Client')),
+        password TEXT NOT NULL,
+        otpEnabled INTEGER NOT NULL DEFAULT 0,
+        otpSecret TEXT,
+        permissions TEXT
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS historique_avaries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         produitId INTEGER NOT NULL,
         produitNom TEXT NOT NULL,
-        quantite INTEGER NOT NULL,
+        quantite REAL NOT NULL,
         action TEXT NOT NULL,
         utilisateur TEXT NOT NULL,
         date INTEGER NOT NULL,
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS clients (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -93,7 +135,6 @@ class DatabaseHelper {
         adresse TEXT
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS bons_commande (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,19 +146,19 @@ class DatabaseHelper {
         FOREIGN KEY (clientId) REFERENCES clients(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS bon_commande_items (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         bonCommandeId INTEGER NOT NULL,
         produitId INTEGER NOT NULL,
-        quantite INTEGER NOT NULL,
+        quantite REAL NOT NULL,
         prixUnitaire REAL NOT NULL,
+        tarifMode TEXT,
+        uniteVente TEXT,
         FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS factures (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -140,7 +181,6 @@ class DatabaseHelper {
         FOREIGN KEY (clientId) REFERENCES clients(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS paiements (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -153,7 +193,6 @@ class DatabaseHelper {
         FOREIGN KEY (factureId) REFERENCES factures(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS factures_archivees (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -178,13 +217,12 @@ class DatabaseHelper {
         FOREIGN KEY (clientId) REFERENCES clients(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS stock_exits (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         produitId INTEGER NOT NULL,
         produitNom TEXT NOT NULL,
-        quantite INTEGER NOT NULL,
+        quantite REAL NOT NULL,
         type TEXT NOT NULL,
         raison TEXT,
         date INTEGER NOT NULL,
@@ -192,13 +230,12 @@ class DatabaseHelper {
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
-
     await db.execute('''
       CREATE TABLE IF NOT EXISTS stock_entries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         produitId INTEGER NOT NULL,
         produitNom TEXT NOT NULL,
-        quantite INTEGER NOT NULL,
+        quantite REAL NOT NULL,
         type TEXT NOT NULL,
         source TEXT,
         date INTEGER NOT NULL,
@@ -206,29 +243,41 @@ class DatabaseHelper {
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
-
-    print('Insertion de données initiales...');
-    await db.insert('suppliers', Supplier(
-      id: 0,
-      name: 'Supplier X',
-      productName: 'Article A',
-      category: 'Électronique',
-      price: 50.00,
-    ).toMap());
-    await db.insert('users', User(
-      id: 0,
-      name: 'Admin',
-      role: 'Administrateur',
-      password: 'admin123', // Default password
-    ).toMap());
-    await db.insert('clients', Client(
-      id: 0,
-      nom: 'client X',
-      email: 'jean.dupont@example.com',
-      telephone: '123456789',
-      adresse: '123 Rue Exemple, Lomé',
-    ).toMap());
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom TEXT NOT NULL UNIQUE
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS unites (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nom TEXT NOT NULL UNIQUE
+      )
+    ''');
+    await db.execute('''
+      INSERT OR IGNORE INTO categories (nom) VALUES 
+      ('Électronique'), ('Vêtements'), ('Alimentation'), ('Boissons'), ('Épicerie'), ('Autres')
+    ''');
+    await db.execute('''
+      INSERT OR IGNORE INTO unites (nom) VALUES 
+      ('Pièce'), ('Litre'), ('kg'), ('Boîte'), ('Paquet')
+    ''');
+    final adminPassword = _hashPassword('admin123');
+    final vendeurPassword = _hashPassword('vendeur123');
+    await db.execute('''
+      INSERT OR IGNORE INTO users (name, role, password, otpEnabled) VALUES 
+      ('Admin', 'Administrateur', ?, 0),
+      ('Vendeur1', 'Vendeur', ?, 0)
+    ''', [adminPassword, vendeurPassword]);
+    await DataInitializer.initializeDefaultData(db);
     print('Base de données initialisée avec succès.');
+  }
+
+  static String _hashPassword(String password) {
+    final bytes = utf8.encode(password);
+    final digest = sha256.convert(bytes);
+    return digest.toString();
   }
 
   static Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -242,7 +291,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           produitId INTEGER NOT NULL,
           produitNom TEXT NOT NULL,
-          quantite INTEGER NOT NULL,
+          quantite REAL NOT NULL,
           action TEXT NOT NULL,
           utilisateur TEXT NOT NULL,
           date INTEGER NOT NULL,
@@ -288,7 +337,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           bonCommandeId INTEGER NOT NULL,
           produitId INTEGER NOT NULL,
-          quantite INTEGER NOT NULL,
+          quantite REAL NOT NULL,
           prixUnitaire REAL NOT NULL,
           FOREIGN KEY (bonCommandeId) REFERENCES bons_commande(id),
           FOREIGN KEY (produitId) REFERENCES produits(id)
@@ -317,13 +366,7 @@ class DatabaseHelper {
           FOREIGN KEY (factureId) REFERENCES factures(id)
         )
       ''');
-      await db.insert('clients', Client(
-        id: 0,
-        nom: 'client X',
-        email: 'jean.dupont@example.com',
-        telephone: '123456789',
-        adresse: '123 Rue Exemple, Lomé',
-      ).toMap());
+      await DataInitializer.initializeDefaultData(db);
     }
     if (oldVersion < 6) {
       print('Migration vers version 6 : ajout de colonnes manquantes');
@@ -438,7 +481,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           produitId INTEGER NOT NULL,
           produitNom TEXT NOT NULL,
-          quantite INTEGER NOT NULL,
+          quantite REAL NOT NULL,
           type TEXT NOT NULL,
           raison TEXT,
           date INTEGER NOT NULL,
@@ -454,7 +497,7 @@ class DatabaseHelper {
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           produitId INTEGER NOT NULL,
           produitNom TEXT NOT NULL,
-          quantite INTEGER NOT NULL,
+          quantite REAL NOT NULL,
           type TEXT NOT NULL,
           source TEXT,
           date INTEGER NOT NULL,
@@ -468,12 +511,442 @@ class DatabaseHelper {
       await db.execute('ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT "password"');
       await db.update(
         'users',
-        {'password': 'admin123'},
+        {'password': _hashPassword('admin123')},
         where: 'name = ?',
         whereArgs: ['Admin'],
       );
+      await DataInitializer.initializeDefaultData(db);
+    }
+    if (oldVersion < 15) {
+      print('Migration vers version 15 : ajout de vendeurNom à factures si manquant');
+      final columns = await db.rawQuery('PRAGMA table_info(factures)');
+      final hasVendeurNom = columns.any((col) => col['name'] == 'vendeurNom');
+      if (!hasVendeurNom) {
+        await db.execute('ALTER TABLE factures ADD COLUMN vendeurNom TEXT');
+        print('Colonne vendeurNom ajoutée à factures');
+      }
+      await DataInitializer.initializeDefaultData(db);
+    }
+    if (oldVersion < 16) {
+      print('Migration vers version 16 : vérification et ajout de clientNom à bons_commande');
+      final columns = await db.rawQuery('PRAGMA table_info(bons_commande)');
+      final hasClientNom = columns.any((col) => col['name'] == 'clientNom');
+      if (!hasClientNom) {
+        await db.execute('ALTER TABLE bons_commande ADD COLUMN clientNom TEXT');
+        print('Colonne clientNom ajoutée à bons_commande');
+        final bonsCommande = await db.query('bons_commande');
+        for (var bc in bonsCommande) {
+          final clientId = bc['clientId'] as int;
+          final client = await db.query('clients', where: 'id = ?', whereArgs: [clientId]);
+          if (client.isNotEmpty) {
+            await db.update(
+              'bons_commande',
+              {'clientNom': client.first['nom'] as String},
+              where: 'id = ?',
+              whereArgs: [bc['id']],
+            );
+          }
+        }
+      }
+      final hasTotal = columns.any((col) => col['name'] == 'total');
+      if (!hasTotal) {
+        await db.execute('ALTER TABLE bons_commande ADD COLUMN total REAL');
+        print('Colonne total ajoutée à bons_commande');
+      }
+    }
+    if (oldVersion < 17) {
+      print('Migration vers version 17 : ajout des tables categories et unites');
+      try {
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS categories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL UNIQUE
+          )
+        ''');
+        print('Table categories créée');
+        await db.execute('''
+          CREATE TABLE IF NOT EXISTS unites (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nom TEXT NOT NULL UNIQUE
+          )
+        ''');
+        print('Table unites créée');
+        await db.execute('''
+          INSERT OR IGNORE INTO categories (nom) VALUES 
+          ('Électronique'), ('Vêtements'), ('Alimentation'), ('Boissons'), ('Épicerie'), ('Autres')
+        ''');
+        print('Données initiales insérées dans categories');
+        await db.execute('''
+          INSERT OR IGNORE INTO unites (nom) VALUES 
+          ('Pièce'), ('Litre'), ('kg'), ('Boîte'), ('Paquet')
+        ''');
+        print('Données initiales insérées dans unites');
+        final products = await db.query('produits');
+        for (var product in products) {
+          final categorie = product['categorie'] as String?;
+          if (categorie == null || categorie.isEmpty || !['Électronique', 'Vêtements', 'Alimentation', 'Boissons', 'Épicerie', 'Autres'].contains(categorie)) {
+            await db.update(
+              'produits',
+              {'categorie': 'Autres'},
+              where: 'id = ?',
+              whereArgs: [product['id']],
+            );
+            print('Produit ${product['nom']} mis à jour avec categorie=Autres');
+          }
+        }
+        await db.execute('''
+          ALTER TABLE users ADD COLUMN role_new TEXT NOT NULL DEFAULT 'Client' CHECK(role_new IN ('Administrateur', 'Vendeur', 'Client'))
+        ''');
+        await db.execute('UPDATE users SET role_new = role');
+        await db.execute('ALTER TABLE users DROP COLUMN role');
+        await db.execute('ALTER TABLE users RENAME COLUMN role_new TO role');
+        print('Schéma de la table users mis à jour');
+        print('Migration vers version 17 terminée avec succès');
+      } catch (e) {
+        print('ERREUR lors de la migration vers version 17 : $e');
+        rethrow;
+      }
+    }
+    if (oldVersion < 18) {
+      print('Migration vers version 18 : mise à jour des mots de passe existants avec hachage SHA-256');
+      try {
+        final users = await db.query('users');
+        for (var user in users) {
+          final password = user['password'] as String;
+          if (password.length != 64 || !RegExp(r'^[a-f0-9]{64}$').hasMatch(password)) {
+            final hashedPassword = _hashPassword(password);
+            await db.update(
+              'users',
+              {'password': hashedPassword},
+              where: 'id = ?',
+              whereArgs: [user['id']],
+            );
+            print('Mot de passe haché pour l\'utilisateur ${user['name']}');
+          } else {
+            print('Mot de passe déjà haché pour l\'utilisateur ${user['name']}');
+          }
+        }
+        print('Migration vers version 18 terminée avec succès');
+      } catch (e) {
+        print('ERREUR lors de la migration vers version 18 : $e');
+        rethrow;
+      }
+    }
+    if (oldVersion < 19) {
+      print('Migration vers version 19 : prise en charge de l\'OTP');
+      final userColumns = await db.rawQuery('PRAGMA table_info(users)');
+      final userColumnNames = userColumns.map((c) => c['name'] as String).toList();
+      if (!userColumnNames.contains('otpEnabled')) {
+        await db.execute('ALTER TABLE users ADD COLUMN otpEnabled INTEGER NOT NULL DEFAULT 0');
+        print('Colonne otpEnabled ajoutée à users');
+      }
+      if (!userColumnNames.contains('otpSecret')) {
+        await db.execute('ALTER TABLE users ADD COLUMN otpSecret TEXT');
+        print('Colonne otpSecret ajoutée à users');
+      }
+    }
+    if (oldVersion < 21) {
+      print('Migration vers version 21 : ajout prixVenteGros/seuilGros dans produits');
+      final columns = await db.rawQuery('PRAGMA table_info(produits)');
+      final names = columns.map((c) => c['name'] as String).toList();
+      if (!names.contains('prixVenteGros')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN prixVenteGros REAL NOT NULL DEFAULT 0.0');
+      }
+      if (!names.contains('seuilGros')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN seuilGros REAL NOT NULL DEFAULT 0.0');
+      }
+    }
+    if (oldVersion < 22) {
+      print('Migration vers version 22 : ajout tarifMode dans bon_commande_items');
+      final cols = await db.rawQuery('PRAGMA table_info(bon_commande_items)');
+      final names = cols.map((c) => c['name'] as String).toList();
+      if (!names.contains('tarifMode')) {
+        await db.execute('ALTER TABLE bon_commande_items ADD COLUMN tarifMode TEXT');
+      }
+    }
+    if (oldVersion < 23) {
+      print('Migration vers version 23 : ajout conditionnement dans produits');
+      final columns = await db.rawQuery('PRAGMA table_info(produits)');
+      final names = columns.map((c) => c['name'] as String).toList();
+      if (!names.contains('conditionnementLabel')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN conditionnementLabel TEXT');
+      }
+      if (!names.contains('conditionnementQuantite')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN conditionnementQuantite REAL NOT NULL DEFAULT 0.0');
+      }
+      if (!names.contains('prixConditionnement')) {
+        await db.execute('ALTER TABLE produits ADD COLUMN prixConditionnement REAL NOT NULL DEFAULT 0.0');
+      }
+    }
+    if (oldVersion < 24) {
+      print('Migration vers version 24 : ajout uniteVente dans bon_commande_items');
+      final cols = await db.rawQuery('PRAGMA table_info(bon_commande_items)');
+      final names = cols.map((c) => c['name'] as String).toList();
+      if (!names.contains('uniteVente')) {
+        await db.execute('ALTER TABLE bon_commande_items ADD COLUMN uniteVente TEXT');
+      }
+    }
+    if (oldVersion < 20) {
+      print('Migration vers version 20 : gestion des permissions par utilisateur');
+      final userColumns = await db.rawQuery('PRAGMA table_info(users)');
+      final userColumnNames = userColumns.map((c) => c['name'] as String).toList();
+      if (!userColumnNames.contains('permissions')) {
+        await db.execute('ALTER TABLE users ADD COLUMN permissions TEXT');
+        print('Colonne permissions ajoutée à users');
+      }
+    }
+    // Ajout migration pour les nouveaux champs de suppliers
+    final supplierColumns = await db.rawQuery('PRAGMA table_info(suppliers)');
+    final supplierColumnNames = supplierColumns.map((c) => c['name'] as String).toList();
+    if (!supplierColumnNames.contains('contact')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN contact TEXT');
+      print('Colonne contact ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('email')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN email TEXT');
+      print('Colonne email ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('telephone')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN telephone TEXT');
+      print('Colonne telephone ajoutée à suppliers');
+    }
+    if (!supplierColumnNames.contains('adresse')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN adresse TEXT');
+      print('Colonne adresse ajoutée à suppliers');
     }
     print('Mise à jour terminée.');
+  }
+
+  static Future<void> ensureSupplierColumns(Database db) async {
+    final supplierColumns = await db.rawQuery('PRAGMA table_info(suppliers)');
+    final supplierColumnNames = supplierColumns.map((c) => c['name'] as String).toList();
+    if (!supplierColumnNames.contains('contact')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN contact TEXT');
+      print('Colonne contact ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('email')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN email TEXT');
+      print('Colonne email ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('telephone')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN telephone TEXT');
+      print('Colonne telephone ajoutée à suppliers (onOpen)');
+    }
+    if (!supplierColumnNames.contains('adresse')) {
+      await db.execute('ALTER TABLE suppliers ADD COLUMN adresse TEXT');
+      print('Colonne adresse ajoutée à suppliers (onOpen)');
+    }
+  }
+
+  static Future<void> ensureUserOtpColumns(Database db) async {
+    final userColumns = await db.rawQuery('PRAGMA table_info(users)');
+    final userColumnNames = userColumns.map((c) => c['name'] as String).toList();
+    if (!userColumnNames.contains('otpEnabled')) {
+      await db.execute('ALTER TABLE users ADD COLUMN otpEnabled INTEGER NOT NULL DEFAULT 0');
+      print('Colonne otpEnabled ajoutée à users (onOpen)');
+    }
+    if (!userColumnNames.contains('otpSecret')) {
+      await db.execute('ALTER TABLE users ADD COLUMN otpSecret TEXT');
+      print('Colonne otpSecret ajoutée à users (onOpen)');
+    }
+    if (!userColumnNames.contains('permissions')) {
+      await db.execute('ALTER TABLE users ADD COLUMN permissions TEXT');
+      print('Colonne permissions ajoutée à users (onOpen)');
+    }
+  }
+
+  static Future<User?> loginUser(String name, String password) async {
+    try {
+      final db = await database;
+      print('Tentative de connexion pour l\'utilisateur : $name...');
+      final hashedPassword = _hashPassword(password);
+      final List<Map<String, dynamic>> maps = await db.query(
+        'users',
+        where: 'name = ? AND password = ?',
+        whereArgs: [name, hashedPassword],
+      );
+      if (maps.isEmpty) {
+        print('Échec de la connexion : utilisateur ou mot de passe incorrect');
+        return null;
+      }
+      print('Connexion réussie pour l\'utilisateur : $name');
+      return User.fromMap(maps.first);
+    } catch (e) {
+      print('Erreur lors de la connexion : $e');
+      if (e.toString().contains('database_closed')) {
+        print('Database closed detected, reinitializing...');
+        _database = null;
+        final db = await database;
+        final hashedPassword = _hashPassword(password);
+        final List<Map<String, dynamic>> maps = await db.query(
+          'users',
+          where: 'name = ? AND password = ?',
+          whereArgs: [name, hashedPassword],
+        );
+        if (maps.isEmpty) {
+          print('Échec de la connexion après réinitialisation : utilisateur ou mot de passe incorrect');
+          return null;
+        }
+        print('Connexion réussie pour l\'utilisateur : $name après réinitialisation');
+        return User.fromMap(maps.first);
+      }
+      throw e;
+    }
+  }
+
+  static Future<void> checkAndInitializeData() async {
+    final db = await database;
+    try {
+      print('Vérification des données initiales...');
+      final userCount = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM users'),
+      );
+      final clientCount = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM clients'),
+      );
+      final productCount = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM produits'),
+      );
+      final categoryCount = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM categories'),
+      );
+      final uniteCount = Sqflite.firstIntValue(
+        await db.rawQuery('SELECT COUNT(*) FROM unites'),
+      );
+
+      print('Utilisateurs: $userCount, Clients: $clientCount, Produits: $productCount, Catégories: $categoryCount, Unités: $uniteCount');
+
+      if (userCount == 0 || clientCount == 0 || productCount == 0 || categoryCount == 0 || uniteCount == 0) {
+        print('Données manquantes détectées, initialisation...');
+        await DataInitializer.initializeDefaultData(db);
+      } else {
+        print('Données initiales déjà présentes.');
+      }
+    } catch (e) {
+      print('Erreur lors de la vérification des données : $e');
+    }
+  }
+
+  static Future<bool> tableExists(Database db, String tableName) async {
+    final result = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+      [tableName],
+    );
+    return result.isNotEmpty;
+  }
+
+  static Future<List<Map<String, dynamic>>> getSalesByVendor({
+    DateTime? specificDay,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? vendor,
+  }) async {
+    final db = await database;
+    try {
+      print('Récupération des ventes par vendeur...');
+      String whereClause = 'f.statut = ?';
+      List<dynamic> whereArgs = ['Active'];
+
+      if (specificDay != null) {
+        final start = DateTime(specificDay.year, specificDay.month, specificDay.day).millisecondsSinceEpoch;
+        final end = DateTime(specificDay.year, specificDay.month, specificDay.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      } else if (startDate != null && endDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      }
+
+      if (vendor != null && vendor.isNotEmpty) {
+        whereClause += ' AND f.vendeurNom = ?';
+        whereArgs.add(vendor);
+      }
+
+      final result = await db.rawQuery(
+        '''
+        SELECT f.vendeurNom, COUNT(f.id) as invoiceCount, SUM(f.total) as totalCA
+        FROM factures f
+        LEFT JOIN users u ON f.vendeurNom = u.name
+        WHERE $whereClause
+        GROUP BY f.vendeurNom
+        ''',
+        whereArgs,
+      );
+
+      print('Ventes par vendeur récupérées : ${result.length}');
+      return result;
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes par vendeur : $e');
+      return [];
+    }
+  }
+
+  static Future<List<String>> getVendors() async {
+    final db = await database;
+    try {
+      print('Récupération des vendeurs...');
+      final result = await db.rawQuery('SELECT name FROM users WHERE role IN (?, ?)', ['Vendeur', 'Administrateur']);
+      final vendors = result.map((row) => row['name'] as String).toList();
+      print('Vendeurs récupérés : ${vendors.length}');
+      return vendors;
+    } catch (e) {
+      print('Erreur lors de la récupération des vendeurs : $e');
+      return [];
+    }
+  }
+
+  static Future<double> getTotalCA({
+    DateTime? specificDay,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? vendor,
+  }) async {
+    final db = await database;
+    try {
+      print('Récupération du chiffre d\'affaires total...');
+      String whereClause = 'f.statut = ?';
+      List<dynamic> whereArgs = ['Active'];
+
+      if (specificDay != null) {
+        final start = DateTime(specificDay.year, specificDay.month, specificDay.day).millisecondsSinceEpoch;
+        final end = DateTime(specificDay.year, specificDay.month, specificDay.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      } else if (startDate != null && endDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      }
+
+      if (vendor != null && vendor.isNotEmpty) {
+        whereClause += ' AND f.vendeurNom = ?';
+        whereArgs.add(vendor);
+      }
+
+      final result = await db.rawQuery(
+        '''
+        SELECT SUM(f.total) as totalCA
+        FROM factures f
+        LEFT JOIN users u ON f.vendeurNom = u.name
+        WHERE $whereClause
+        ''',
+        whereArgs,
+      );
+
+      final totalCA = (result.first['totalCA'] as num?)?.toDouble() ?? 0.0;
+      print('Chiffre d\'affaires total : $totalCA');
+      return totalCA;
+    } catch (e) {
+      print('Erreur lors de la récupération du CA total : $e');
+      return 0.0;
+    }
   }
 
   static Future<List<Produit>> getProduits() async {
@@ -519,7 +992,7 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Ajout de l\'utilisateur : ${user.name}...');
-      await db.insert('users', user.toMap());
+      await db.insert('users', user.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
       print('Utilisateur ajouté avec succès');
     } catch (e) {
       print('Erreur lors de l\'ajout de l\'utilisateur : $e');
@@ -527,13 +1000,78 @@ class DatabaseHelper {
     }
   }
 
+  static Future<void> restoreAdminAccount() async {
+    final db = await database;
+    final defaultPassword = _hashPassword('admin123');
+    try {
+      final existingAdmin = await db.query(
+        'users',
+        where: 'LOWER(name) = ?',
+        whereArgs: ['admin'],
+        limit: 1,
+      );
+
+      if (existingAdmin.isEmpty) {
+        await db.insert('users', {
+          'name': 'Admin',
+          'role': 'Administrateur',
+          'password': defaultPassword,
+          'otpEnabled': 0,
+          'otpSecret': null,
+        });
+        print('Compte administrateur restauré (création).');
+      } else {
+        await db.update(
+          'users',
+          {
+            'name': 'Admin',
+            'role': 'Administrateur',
+            'password': defaultPassword,
+          },
+          where: 'id = ?',
+          whereArgs: [existingAdmin.first['id']],
+        );
+        print('Compte administrateur restauré (réinitialisation).');
+      }
+    } catch (e) {
+      print('Erreur lors de la restauration du compte administrateur : $e');
+      rethrow;
+    }
+  }
+
   static Future<void> updateUser(User user) async {
     final db = await database;
     try {
       print('Mise à jour de l\'utilisateur : ${user.name}...');
+      final existing = await db.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [user.id],
+        limit: 1,
+      );
+      if (existing.isEmpty) {
+        throw Exception('Utilisateur introuvable');
+      }
+
+      final wasAdmin = (existing.first['role'] as String?) == 'Administrateur';
+      final adminCount = await _countAdministrators(db);
+      final isAdminAfterUpdate = user.role == 'Administrateur';
+
+      if (wasAdmin && !isAdminAfterUpdate && adminCount <= 1) {
+        throw Exception('Impossible de retirer le dernier administrateur');
+      }
+
+      final data = user.toMap();
+      if (isAdminAfterUpdate) {
+        final adminCountAfter = wasAdmin ? adminCount : adminCount + 1;
+        if (adminCountAfter <= 1) {
+          data['permissions'] = null;
+        }
+      }
+
       await db.update(
         'users',
-        user.toMap(),
+        data,
         where: 'id = ?',
         whereArgs: [user.id],
       );
@@ -548,6 +1086,26 @@ class DatabaseHelper {
     final db = await database;
     try {
       print('Suppression de l\'utilisateur avec id : $id...');
+      final existing = await db.query(
+        'users',
+        where: 'id = ?',
+        whereArgs: [id],
+        limit: 1,
+      );
+
+      if (existing.isEmpty) {
+        print('Aucun utilisateur trouvé pour l\'id $id.');
+        return;
+      }
+
+      final isAdmin = (existing.first['role'] as String?) == 'Administrateur';
+      if (isAdmin) {
+        final adminCount = await _countAdministrators(db);
+        if (adminCount <= 1) {
+          throw Exception('Impossible de supprimer le dernier administrateur');
+        }
+      }
+
       await db.delete(
         'users',
         where: 'id = ?',
@@ -557,27 +1115,6 @@ class DatabaseHelper {
     } catch (e) {
       print('Erreur lors de la suppression de l\'utilisateur : $e');
       throw e;
-    }
-  }
-
-  static Future<User?> loginUser(String name, String password) async {
-    final db = await database;
-    try {
-      print('Tentative de connexion pour l\'utilisateur : $name...');
-      final List<Map<String, dynamic>> maps = await db.query(
-        'users',
-        where: 'name = ? AND password = ?',
-        whereArgs: [name, password],
-      );
-      if (maps.isEmpty) {
-        print('Échec de la connexion : utilisateur ou mot de passe incorrect');
-        return null;
-      }
-      print('Connexion réussie pour l\'utilisateur : $name');
-      return User.fromMap(maps.first);
-    } catch (e) {
-      print('Erreur lors de la connexion : $e');
-      return null;
     }
   }
 
@@ -594,14 +1131,29 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<Facture>> getFactures({bool includeArchived = false}) async {
+  static Future<List<Facture>> getFactures({bool includeArchived = false, String? vendeurNom}) async {
     final db = await database;
     try {
       print('Récupération des factures...');
+      String? where;
+      List<dynamic>? whereArgs;
+      if (!includeArchived) {
+        where = 'statut = ?';
+        whereArgs = ['Active'];
+      }
+      if (vendeurNom != null) {
+        if (where != null) {
+          where += ' AND vendeurNom = ?';
+          whereArgs!.add(vendeurNom);
+        } else {
+          where = 'vendeurNom = ?';
+          whereArgs = [vendeurNom];
+        }
+      }
       final List<Map<String, dynamic>> maps = await db.query(
         'factures',
-        where: includeArchived ? null : 'statut = ?',
-        whereArgs: includeArchived ? null : ['Active'],
+        where: where,
+        whereArgs: whereArgs,
       );
       print('Factures récupérées : ${maps.length}');
       return List.generate(maps.length, (i) => Facture.fromMap(maps[i]));
@@ -695,6 +1247,292 @@ class DatabaseHelper {
     } catch (e) {
       print('Erreur lors de la récupération des produits vendus : $e');
       return 0;
+    }
+  }
+
+  // Nouvelles méthodes pour le tableau de bord des ventes
+  static Future<double> getTotalSalesToday() async {
+    final db = await database;
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE date >= ? AND date < ? AND statut = 'Active'
+      ''', [startOfDay.millisecondsSinceEpoch, endOfDay.millisecondsSinceEpoch]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes du jour : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<int> getPaidInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'Payé' AND statut = 'Active'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures payées : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getPendingInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'En attente' AND statut = 'Active'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures en attente : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getCancelledInvoicesCount() async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statut = 'Annulée'
+      ''');
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures annulées : $e');
+      return 0;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getTopSellingProducts({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM bon_commande_items bci
+        JOIN produits p ON bci.produitId = p.id
+        JOIN factures f ON bci.bonCommandeId = f.bonCommandeId
+        WHERE f.statut != 'Annulée'
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite DESC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits les plus vendus : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getLeastSellingProducts({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM produits p
+        LEFT JOIN bon_commande_items bci ON p.id = bci.produitId
+        LEFT JOIN factures f ON bci.bonCommandeId = f.bonCommandeId AND f.statut != 'Annulée'
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite ASC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits les moins vendus : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getTopClients({int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          COALESCE(f.clientNom, 'Client anonyme') as clientNom,
+          COUNT(*) as factureCount,
+          COALESCE(SUM(f.total), 0) as totalCA
+        FROM factures f
+        WHERE f.statut = 'Active'
+        GROUP BY f.clientNom
+        ORDER BY totalCA DESC
+        LIMIT ?
+      ''', [limit]);
+      
+      return result.map((row) => {
+        'clientNom': row['clientNom'] ?? 'Client anonyme',
+        'factureCount': (row['factureCount'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des meilleurs clients : $e');
+      return [];
+    }
+  }
+
+  // Méthodes spécifiques au vendeur
+  static Future<double> getVendorSalesToday(String vendorName) async {
+    final db = await database;
+    try {
+      final today = DateTime.now();
+      final startOfDay = DateTime(today.year, today.month, today.day);
+      final endOfDay = startOfDay.add(const Duration(days: 1));
+      
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE date >= ? AND date < ? AND statut = 'Active' AND vendeurNom = ?
+      ''', [startOfDay.millisecondsSinceEpoch, endOfDay.millisecondsSinceEpoch, vendorName]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes du vendeur aujourd\'hui : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<double> getVendorTotalSales(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT SUM(total) as total
+        FROM factures
+        WHERE statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      
+      final total = result.first['total'];
+      if (total == null) return 0.0;
+      return (total as num).toDouble();
+    } catch (e) {
+      print('Erreur lors de la récupération du total des ventes du vendeur : $e');
+      return 0.0;
+    }
+  }
+
+  static Future<int> getVendorInvoicesCount(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération du nombre de factures du vendeur : $e');
+      return 0;
+    }
+  }
+
+  static Future<int> getVendorPaidInvoicesCount(String vendorName) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT COUNT(*) as count
+        FROM factures
+        WHERE statutPaiement = 'Payé' AND statut = 'Active' AND vendeurNom = ?
+      ''', [vendorName]);
+      return Sqflite.firstIntValue(result) ?? 0;
+    } catch (e) {
+      print('Erreur lors de la récupération des factures payées du vendeur : $e');
+      return 0;
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getVendorTopProducts(String vendorName, {int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          p.id,
+          p.nom,
+          p.imageUrl,
+          COALESCE(SUM(bci.quantite), 0) as totalQuantite,
+          COALESCE(SUM(bci.quantite * bci.prixUnitaire), 0) as totalCA
+        FROM bon_commande_items bci
+        JOIN produits p ON bci.produitId = p.id
+        JOIN factures f ON bci.bonCommandeId = f.bonCommandeId
+        WHERE f.statut != 'Annulée' AND f.vendeurNom = ?
+        GROUP BY p.id, p.nom, p.imageUrl
+        ORDER BY totalQuantite DESC
+        LIMIT ?
+      ''', [vendorName, limit]);
+      
+      return result.map((row) => {
+        'id': (row['id'] as num?)?.toInt(),
+        'nom': row['nom'] ?? 'N/A',
+        'imageUrl': row['imageUrl'],
+        'totalQuantite': (row['totalQuantite'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des produits du vendeur : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getVendorTopClients(String vendorName, {int limit = 5}) async {
+    final db = await database;
+    try {
+      final result = await db.rawQuery('''
+        SELECT 
+          COALESCE(f.clientNom, 'Client anonyme') as clientNom,
+          COUNT(*) as factureCount,
+          COALESCE(SUM(f.total), 0) as totalCA
+        FROM factures f
+        WHERE f.statut = 'Active' AND f.vendeurNom = ?
+        GROUP BY f.clientNom
+        ORDER BY totalCA DESC
+        LIMIT ?
+      ''', [vendorName, limit]);
+      
+      return result.map((row) => {
+        'clientNom': row['clientNom'] ?? 'Client anonyme',
+        'factureCount': (row['factureCount'] as num?)?.toInt() ?? 0,
+        'totalCA': (row['totalCA'] as num?)?.toDouble() ?? 0.0,
+      }).toList();
+    } catch (e) {
+      print('Erreur lors de la récupération des clients du vendeur : $e');
+      return [];
     }
   }
 
@@ -950,15 +1788,41 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<StockExit>> getStockExits({String? typeFilter}) async {
+  static Future<List<StockExit>> getStockExits({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération des sorties de stock...');
+      String? whereClause;
+      List<dynamic> whereArgs = [];
+
+      if (typeFilter != null) {
+        whereClause = 'type = ?';
+        whereArgs.add(typeFilter);
+      }
+
+      if (startDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        whereClause = whereClause == null ? 'date >= ?' : '$whereClause AND date >= ?';
+        whereArgs.add(start);
+      }
+
+      if (endDate != null) {
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause = whereClause == null ? 'date <= ?' : '$whereClause AND date <= ?';
+        whereArgs.add(end);
+      }
+
       final maps = await db.query(
         'stock_exits',
-        where: typeFilter != null ? 'type = ?' : null,
-        whereArgs: typeFilter != null ? [typeFilter] : null,
+        where: whereClause,
+        whereArgs: whereArgs.isEmpty ? null : whereArgs,
+        orderBy: 'date DESC',
       );
+
       print('Sorties de stock récupérées : ${maps.length}');
       return maps.map((map) => StockExit.fromMap(map)).toList();
     } catch (e) {
@@ -967,17 +1831,40 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<Map<String, dynamic>>> getAllExits({String? typeFilter}) async {
+  static Future<List<Map<String, dynamic>>> getAllExits({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération de toutes les sorties (ventes + autres)...');
       List<Map<String, dynamic>> exits = [];
+      List<String> conditions = [];
+      List<dynamic> args = [];
 
-      final stockExits = await db.query(
-        'stock_exits',
-        where: typeFilter != null && typeFilter != 'sale' ? 'type = ?' : null,
-        whereArgs: typeFilter != null && typeFilter != 'sale' ? [typeFilter] : null,
-      );
+      // Construire les conditions pour stock_exits
+      String stockExitsQuery = 'SELECT * FROM stock_exits';
+      if (typeFilter != null && typeFilter != 'sale') {
+        conditions.add('type = ?');
+        args.add(typeFilter);
+      }
+      if (startDate != null) {
+        conditions.add('date >= ?');
+        args.add(DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch);
+      }
+      if (endDate != null) {
+        conditions.add('date <= ?');
+        args.add(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999).millisecondsSinceEpoch);
+      }
+
+      if (conditions.isNotEmpty) {
+        stockExitsQuery += ' WHERE ${conditions.join(' AND ')}';
+      }
+      stockExitsQuery += ' ORDER BY date DESC';
+
+      // Exécuter la requête pour stock_exits
+      final stockExits = await db.rawQuery(stockExitsQuery, args);
       exits.addAll(stockExits.map((e) => {
             'id': e['id'],
             'produitId': e['produitId'],
@@ -990,8 +1877,13 @@ class DatabaseHelper {
             'source': 'stock_exit',
           }));
 
+      // Réinitialiser conditions et arguments pour les ventes
+      conditions.clear();
+      args.clear();
+
+      // Construire la requête pour les ventes (si nécessaire)
       if (typeFilter == null || typeFilter == 'sale') {
-        final saleExits = await db.rawQuery('''
+        String salesQuery = '''
           SELECT bci.id, bci.produitId, p.nom as produitNom, bci.quantite, 'sale' as type, 
                  f.numero as raison, f.date, u.name as utilisateur
           FROM bon_commande_items bci
@@ -999,7 +1891,23 @@ class DatabaseHelper {
           JOIN produits p ON p.id = bci.produitId
           JOIN users u ON u.id = (SELECT id FROM users LIMIT 1)
           WHERE f.statut != 'Annulée'
-        ''');
+        ''';
+        if (startDate != null) {
+          conditions.add('f.date >= ?');
+          args.add(DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch);
+        }
+        if (endDate != null) {
+          conditions.add('f.date <= ?');
+          args.add(DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59, 999).millisecondsSinceEpoch);
+        }
+
+        if (conditions.isNotEmpty) {
+          salesQuery += ' AND ${conditions.join(' AND ')}';
+        }
+        salesQuery += ' ORDER BY f.date DESC';
+
+        // Exécuter la requête pour les ventes
+        final saleExits = await db.rawQuery(salesQuery, args);
         exits.addAll(saleExits.map((e) => {
               'id': e['id'],
               'produitId': e['produitId'],
@@ -1013,6 +1921,7 @@ class DatabaseHelper {
             }));
       }
 
+      // Trier toutes les sorties par date décroissante
       exits.sort((a, b) => (b['date'] as int).compareTo(a['date'] as int));
       print('Total sorties récupérées : ${exits.length}');
       return exits;
@@ -1052,21 +1961,172 @@ class DatabaseHelper {
     }
   }
 
-  static Future<List<StockEntry>> getStockEntries({String? typeFilter}) async {
+  static Future<List<StockEntry>> getStockEntries({
+    String? typeFilter,
+    DateTime? startDate,
+    DateTime? endDate,
+  }) async {
     final db = await database;
     try {
       print('Récupération des entrées de stock...');
+      String? whereClause;
+      List<dynamic> whereArgs = [];
+
+      if (typeFilter != null) {
+        whereClause = 'type = ?';
+        whereArgs.add(typeFilter);
+      }
+
+      if (startDate != null && endDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause = whereClause == null
+            ? 'date BETWEEN ? AND ?'
+            : '$whereClause AND date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      }
+
       final maps = await db.query(
         'stock_entries',
-        where: typeFilter != null ? 'type = ?' : null,
-        whereArgs: typeFilter != null ? [typeFilter] : null,
+        where: whereClause,
+        whereArgs: whereArgs.isEmpty ? null : whereArgs,
         orderBy: 'date DESC',
       );
+
       print('Entrées de stock récupérées : ${maps.length}');
-      return maps.map((map) => StockEntry.fromMap(map)).toList();
+      return maps.map((map) {
+        final dateMillis = map['date'] as int;
+        return StockEntry(
+          id: map['id'] as int,
+          produitId: map['produitId'] as int,
+          produitNom: map['produitNom'] as String,
+          quantite: map['quantite'] as int,
+          type: map['type'] as String,
+          source: map['source'] as String?,
+          date: DateTime.fromMillisecondsSinceEpoch(dateMillis),
+          utilisateur: map['utilisateur'] as String,
+        );
+      }).toList();
     } catch (e) {
       print('Erreur lors de la récupération des entrées de stock : $e');
       return [];
     }
   }
+
+  static Future<List<Map<String, dynamic>>> getSalesByProduct({
+    DateTime? specificDay,
+    DateTime? startDate,
+    DateTime? endDate,
+    String? vendor,
+  }) async {
+    final db = await database;
+    try {
+      print('Récupération des ventes par produit...');
+      String whereClause = 'f.statut = ?';
+      List<dynamic> whereArgs = ['Active'];
+
+      if (specificDay != null) {
+        final start = DateTime(specificDay.year, specificDay.month, specificDay.day).millisecondsSinceEpoch;
+        final end = DateTime(specificDay.year, specificDay.month, specificDay.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      } else if (startDate != null && endDate != null) {
+        final start = DateTime(startDate.year, startDate.month, startDate.day).millisecondsSinceEpoch;
+        final end = DateTime(endDate.year, endDate.month, endDate.day, 23, 59, 59).millisecondsSinceEpoch;
+        whereClause += ' AND f.date BETWEEN ? AND ?';
+        whereArgs.add(start);
+        whereArgs.add(end);
+      }
+
+      if (vendor != null && vendor.isNotEmpty) {
+        whereClause += ' AND f.vendeurNom = ?';
+        whereArgs.add(vendor);
+      }
+
+      final result = await db.rawQuery(
+        '''
+        SELECT p.id, p.nom, p.unite, SUM(bci.quantite) as totalQuantite, SUM(bci.quantite * bci.prixUnitaire) as totalCA
+        FROM produits p
+        JOIN bon_commande_items bci ON p.id = bci.produitId
+        JOIN bons_commande bc ON bci.bonCommandeId = bc.id
+        JOIN factures f ON bc.id = f.bonCommandeId
+        LEFT JOIN users u ON f.vendeurNom = u.name
+        WHERE $whereClause
+        GROUP BY p.id, p.nom, p.unite
+        ''',
+        whereArgs,
+      );
+
+      print('Ventes par produit récupérées : ${result.length}');
+      return result;
+    } catch (e) {
+      print('Erreur lors de la récupération des ventes par produit : $e');
+      return [];
+    }
+  }
+
+  static Future<List<Produit>> getLowStockProducts() async {
+    final db = await database;
+    try {
+      print('Récupération des produits en rupture ou bientôt en rupture...');
+      final List<Map<String, dynamic>> maps = await db.query(
+        'produits',
+        where: 'quantiteStock = 0 OR quantiteStock <= seuilAlerte',
+      );
+      print('Produits en rupture/bientôt en rupture récupérés : ${maps.length}');
+      return List.generate(maps.length, (i) => Produit.fromMap(maps[i]));
+    } catch (e) {
+      print('Erreur lors de la récupération des produits en rupture : $e');
+      return [];
+    }
+  }
+
+  static Future<void> addSupplier(Supplier supplier) async {
+    final db = await database;
+    try {
+      print('Ajout du fournisseur : ${supplier.name}...');
+      await db.insert('suppliers', supplier.toMap());
+      print('Fournisseur ajouté avec succès');
+    } catch (e) {
+      print('Erreur lors de l\'ajout du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> updateSupplier(Supplier supplier) async {
+    final db = await database;
+    try {
+      print('Mise à jour du fournisseur : ${supplier.name}...');
+      await db.update(
+        'suppliers',
+        supplier.toMap(),
+        where: 'id = ?',
+        whereArgs: [supplier.id],
+      );
+      print('Fournisseur mis à jour avec succès');
+    } catch (e) {
+      print('Erreur lors de la mise à jour du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static Future<void> deleteSupplier(int id) async {
+    final db = await database;
+    try {
+      print('Suppression du fournisseur avec id : $id...');
+      await db.delete(
+        'suppliers',
+        where: 'id = ?',
+        whereArgs: [id],
+      );
+      print('Fournisseur supprimé avec succès');
+    } catch (e) {
+      print('Erreur lors de la suppression du fournisseur : $e');
+      throw e;
+    }
+  }
+
+  static getDatabase() {}
 }

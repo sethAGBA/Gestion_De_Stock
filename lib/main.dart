@@ -1,24 +1,40 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:window_manager/window_manager.dart';
-
+import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'helpers/database_helper.dart';
+import 'providers/auth_provider.dart';
 import 'screens/dashboard_screen.dart';
+import 'screens/login_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
+  // Initialize sqflite FFI on desktop (Windows/Linux/Mac)
+  if (Platform.isWindows || Platform.isLinux) {
+    sqfliteFfiInit();
+    databaseFactory = databaseFactoryFfi;
+  }
   await windowManager.ensureInitialized();
-
-  // Obtenir la taille de l'écran principal
+  // Initialize French locale data for intl
+  await initializeDateFormatting('fr_FR', null);
+  // Créez le dossier images
+  final appDir = await getApplicationDocumentsDirectory();
+  final imagesDir = Directory('${appDir.path}/images');
+  if (!await imagesDir.exists()) {
+    await imagesDir.create(recursive: true);
+  }
   final screen = await windowManager.getBounds();
   final screenSize = screen.size;
-
-  // Définir une taille par défaut relative (80% de l'écran)
   final double defaultWidth = screenSize.width * 0.8;
   final double defaultHeight = screenSize.height * 0.8;
 
   WindowOptions windowOptions = WindowOptions(
     size: Size(defaultWidth, defaultHeight),
-    minimumSize: const Size(1000, 700), // Taille minimale imposée
+    minimumSize: const Size(1000, 700),
     center: true,
     title: "Gestion de Stock",
     backgroundColor: Colors.white,
@@ -29,6 +45,7 @@ void main() async {
     await windowManager.focus();
   });
 
+  await DatabaseHelper.checkAndInitializeData();
   runApp(const StockManagementApp());
 }
 
@@ -37,18 +54,21 @@ class StockManagementApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'Gestion de Stock',
-      theme: ThemeData(
-        primaryColor: const Color(0xFF1C3144),
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFF1C3144),
-          primary: const Color(0xFF1C3144),
+    return ChangeNotifierProvider(
+      create: (_) => AuthProvider(),
+      child: MaterialApp(
+        debugShowCheckedModeBanner: false,
+        title: 'Gestion de Stock',
+        theme: ThemeData(
+          primaryColor: const Color(0xFF1C3144),
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: const Color(0xFF1C3144),
+            primary: const Color(0xFF1C3144),
+          ),
+          useMaterial3: true,
         ),
-        useMaterial3: true,
+        home: const LoginScreen(),
       ),
-      home: const DashboardScreen(),
     );
   }
 }
