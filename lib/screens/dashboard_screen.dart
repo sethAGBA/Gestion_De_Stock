@@ -1296,68 +1296,178 @@ class DashboardContent extends StatelessWidget {
       );
     }
 
-    void _showProductDetails(BuildContext ctx, Produit produit) {
+    void _showProductDetails(BuildContext ctx, Produit produit) async {
       final theme = Theme.of(ctx);
       final isDarkMode = theme.brightness == Brightness.dark;
       final currency = NumberFormat('#,##0.00', 'fr_FR');
-      showDialog(
-        context: ctx,
-        barrierDismissible: true,
-        builder: (context) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
-          contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-          title: Row(
+      final lots = await DatabaseHelper.database.then((db) => db.query(
+            'lots',
+            where: 'produitId = ?',
+            whereArgs: [produit.id],
+            orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+          ));
+
+      Widget infoRow(String label, String value) {
+        return Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4.0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Container(
-                width: 44,
-                height: 44,
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(8), color: Colors.blue.shade50),
-                clipBehavior: Clip.antiAlias,
-                child: (produit.imageUrl != null && produit.imageUrl!.isNotEmpty && File(produit.imageUrl!).existsSync())
-                    ? Image.file(File(produit.imageUrl!), fit: BoxFit.cover)
-                    : Icon(Icons.inventory_2_outlined, color: Colors.blue.shade600),
-              ),
+              Text(label, style: const TextStyle(color: Colors.grey)),
               const SizedBox(width: 12),
               Expanded(
-                child: Text(produit.nom, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 8),
-              _detailRow('Catégorie', produit.categorie),
-              if (produit.marque != null && produit.marque!.isNotEmpty) _detailRow('Marque', produit.marque!),
-              if (produit.sku != null && produit.sku!.isNotEmpty) _detailRow('SKU', produit.sku!),
-              if (produit.codeBarres != null && produit.codeBarres!.isNotEmpty) _detailRow('Code-barres', produit.codeBarres!),
-              _detailRow('Unité', produit.unite),
-              _detailRow('Stock', '${produit.quantiteStock}'),
-              _detailRow('Prix vente', '${currency.format(produit.prixVente)} FCFA'),
-              if (produit.prixVenteGros > 0) _detailRow('Prix gros', '${currency.format(produit.prixVenteGros)} FCFA'),
-              if (produit.description != null && produit.description!.isNotEmpty) ...[
-                const SizedBox(height: 8),
-                Text('Description', style: theme.textTheme.labelLarge),
-                const SizedBox(height: 4),
-                Text(produit.description!),
-              ],
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () => _showEnlargedImage(ctx, produit.imageUrl),
-                  icon: const Icon(Icons.zoom_in),
-                  label: Text('Voir l\'image', style: TextStyle(color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700)),
+                child: Text(
+                  value.isEmpty ? '-' : value,
+                  textAlign: TextAlign.right,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
                 ),
               ),
             ],
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Fermer')),
-          ],
+        );
+      }
+
+      showDialog(
+        context: ctx,
+        barrierDismissible: true,
+        builder: (context) => Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: 720,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200,
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: (produit.imageUrl != null && produit.imageUrl!.isNotEmpty && File(produit.imageUrl!).existsSync())
+                          ? Image.file(File(produit.imageUrl!), fit: BoxFit.cover)
+                          : Icon(Icons.inventory_2_outlined, color: Colors.blue.shade600),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(produit.nom, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              Chip(label: Text(produit.categorie)),
+                              if (produit.statutPrescription?.isNotEmpty ?? false) Chip(label: Text(produit.statutPrescription!)),
+                              if (produit.dci?.isNotEmpty ?? false) Chip(label: Text('DCI: ${produit.dci}')),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          infoRow('Forme', produit.forme ?? '-'),
+                          infoRow('Dosage', produit.dosage ?? '-'),
+                          infoRow('Conditionnement', produit.conditionnement ?? '-'),
+                          infoRow('CIP/GTIN', produit.cip ?? '-'),
+                          infoRow('Fabricant', produit.fabricant ?? '-'),
+                          infoRow('AMM', produit.amm ?? '-'),
+                          infoRow('Statut', produit.statutPrescription ?? '-'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          infoRow('SKU', produit.sku ?? '-'),
+                          infoRow('Code-barres', produit.codeBarres ?? '-'),
+                          infoRow('Unité', produit.unite),
+                          infoRow('Stock', '${produit.quantiteStock}'),
+                          infoRow('Avarié', '${produit.quantiteAvariee}'),
+                          infoRow('Prix vente', '${currency.format(produit.prixVente)} FCFA'),
+                          if (produit.prixVenteGros > 0) infoRow('Prix gros', '${currency.format(produit.prixVenteGros)} FCFA'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (produit.description != null && produit.description!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('Description', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(produit.description!),
+                ],
+                if (lots.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('Lots', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 140,
+                    child: ListView.separated(
+                      itemCount: lots.length,
+                      separatorBuilder: (_, __) => const Divider(),
+                      itemBuilder: (context, index) {
+                        final lot = lots[index];
+                        final exp = lot['dateExpiration'] != null
+                            ? DateTime.fromMillisecondsSinceEpoch(lot['dateExpiration'] as int)
+                            : null;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Lot ${lot['numeroLot']}'),
+                            Text(
+                              'Dispo: ${(lot['quantiteDisponible'] as num).toDouble()}'
+                              '${exp != null ? ' • exp: ${DateFormat('dd/MM/yy').format(exp)}' : ''}',
+                              style: TextStyle(
+                                color: (exp != null && exp.isBefore(DateTime.now().add(const Duration(days: 30))))
+                                    ? Colors.red
+                                    : Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showEnlargedImage(ctx, produit.imageUrl),
+                    icon: const Icon(Icons.zoom_in),
+                    label: Text(
+                      'Voir l\'image',
+                      style: TextStyle(color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }

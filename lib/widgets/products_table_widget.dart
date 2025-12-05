@@ -238,6 +238,13 @@ class _ProductsTableWidgetState extends State<ProductsTableWidget> {
             if (produit.marque != null && produit.marque!.isNotEmpty) _detailRow('Marque', produit.marque!),
             if (produit.sku != null && produit.sku!.isNotEmpty) _detailRow('SKU', produit.sku!),
             if (produit.codeBarres != null && produit.codeBarres!.isNotEmpty) _detailRow('Code-barres', produit.codeBarres!),
+            if (produit.dci != null && produit.dci!.isNotEmpty) _detailRow('DCI', produit.dci!),
+            if (produit.forme != null && produit.forme!.isNotEmpty) _detailRow('Forme', produit.forme!),
+            if (produit.dosage != null && produit.dosage!.isNotEmpty) _detailRow('Dosage', produit.dosage!),
+            if (produit.conditionnement != null && produit.conditionnement!.isNotEmpty)
+              _detailRow('Conditionnement', produit.conditionnement!),
+            if (produit.cip != null && produit.cip!.isNotEmpty) _detailRow('CIP/GTIN', produit.cip!),
+            if (produit.fabricant != null && produit.fabricant!.isNotEmpty) _detailRow('Fabricant', produit.fabricant!),
             _detailRow('Unité', produit.unite),
             _detailRow('Stock', '${produit.quantiteStock}'),
             _detailRow('Prix vente', '${currency.format(produit.prixVente)} FCFA'),

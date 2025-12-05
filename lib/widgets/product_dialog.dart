@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:file_picker/file_picker.dart';
 import '../models/models.dart';
@@ -40,6 +41,17 @@ class _ProductDialogState extends State<ProductDialog> {
   String? _imagePath;
   String? _sku;
   String? _codeBarres;
+  String? _dci;
+  String? _forme;
+  String? _dosage;
+  String? _condPharma;
+  String? _cip;
+  String? _fabricant;
+  String? _amm;
+  String? _statutPrescription;
+  String? _lotNumero;
+  DateTime? _lotExpiration;
+  double _lotQuantite = 0.0;
   String _unite = '';
   String? _conditionnementLabel;
   double _conditionnementQuantite = 0.0;
@@ -112,6 +124,14 @@ class _ProductDialogState extends State<ProductDialog> {
       _imagePath = widget.produit!.imageUrl;
       _sku = widget.produit!.sku;
       _codeBarres = widget.produit!.codeBarres;
+      _dci = widget.produit!.dci;
+      _forme = widget.produit!.forme;
+      _dosage = widget.produit!.dosage;
+      _condPharma = widget.produit!.conditionnement;
+      _cip = widget.produit!.cip;
+      _fabricant = widget.produit!.fabricant;
+      _amm = widget.produit!.amm;
+      _statutPrescription = widget.produit!.statutPrescription;
       _unite = widget.unites.contains(widget.produit!.unite) ? widget.produit!.unite : widget.unites.first;
       _conditionnementLabel = widget.produit!.conditionnementLabel;
       _conditionnementQuantite = widget.produit!.conditionnementQuantite;
@@ -216,6 +236,14 @@ class _ProductDialogState extends State<ProductDialog> {
         imageUrl: _imageUrl,
         sku: _sku,
         codeBarres: _codeBarres,
+        dci: _dci,
+        forme: _forme,
+        dosage: _dosage,
+        conditionnement: _condPharma,
+        cip: _cip,
+        fabricant: _fabricant,
+        amm: _amm,
+        statutPrescription: _statutPrescription,
         unite: _unite,
         conditionnementLabel: _conditionnementLabel,
         conditionnementQuantite: _conditionnementQuantite,
@@ -240,8 +268,18 @@ class _ProductDialogState extends State<ProductDialog> {
       );
       try {
         print('Tentative d\'insertion du produit : $_nom');
-        await widget.database.insert('produits', produit.toMap(),
+        final newId = await widget.database.insert('produits', produit.toMap(),
             conflictAlgorithm: ConflictAlgorithm.replace);
+        // Enregistre le lot si fourni
+        if ((_lotNumero?.isNotEmpty ?? false) && _lotQuantite > 0) {
+          await widget.database.insert('lots', {
+            'produitId': newId,
+            'numeroLot': _lotNumero,
+            'dateExpiration': _lotExpiration?.millisecondsSinceEpoch,
+            'quantite': _lotQuantite,
+            'quantiteDisponible': _lotQuantite,
+          });
+        }
         print('Produit inséré avec succès : $_nom');
       } catch (e) {
         print('Erreur lors de l\'insertion du produit : $e');
@@ -324,6 +362,14 @@ class _ProductDialogState extends State<ProductDialog> {
         imageUrl: _imageUrl,
         sku: _sku,
         codeBarres: _codeBarres,
+        dci: _dci,
+        forme: _forme,
+        dosage: _dosage,
+        conditionnement: _condPharma,
+        cip: _cip,
+        fabricant: _fabricant,
+        amm: _amm,
+        statutPrescription: _statutPrescription,
         unite: _unite,
         conditionnementLabel: _conditionnementLabel,
         conditionnementQuantite: _conditionnementQuantite,
@@ -354,6 +400,15 @@ class _ProductDialogState extends State<ProductDialog> {
           where: 'id = ?',
           whereArgs: [produit.id],
         );
+        if ((_lotNumero?.isNotEmpty ?? false) && _lotQuantite > 0) {
+          await widget.database.insert('lots', {
+            'produitId': produit.id,
+            'numeroLot': _lotNumero,
+            'dateExpiration': _lotExpiration?.millisecondsSinceEpoch,
+            'quantite': _lotQuantite,
+            'quantiteDisponible': _lotQuantite,
+          });
+        }
         print('Produit mis à jour avec succès : $_nom');
       } catch (e) {
         print('Erreur lors de la mise à jour du produit : $e');
@@ -622,6 +677,86 @@ class _ProductDialogState extends State<ProductDialog> {
                       Row(
                         children: [
                           Expanded(
+                            child: TextFormField(
+                              initialValue: _dci,
+                              decoration: const InputDecoration(labelText: 'DCI', border: OutlineInputBorder()),
+                              onSaved: (value) => _dci = value,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _forme,
+                              decoration: const InputDecoration(labelText: 'Forme galénique', border: OutlineInputBorder()),
+                              onSaved: (value) => _forme = value,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _dosage,
+                              decoration: const InputDecoration(labelText: 'Dosage (ex: 500mg)', border: OutlineInputBorder()),
+                              onSaved: (value) => _dosage = value,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _condPharma,
+                              decoration: const InputDecoration(labelText: 'Conditionnement (boîte/blister)', border: OutlineInputBorder()),
+                              onSaved: (value) => _condPharma = value,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _cip,
+                              decoration: const InputDecoration(labelText: 'CIP / GTIN', border: OutlineInputBorder()),
+                              onSaved: (value) => _cip = value,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _fabricant,
+                              decoration: const InputDecoration(labelText: 'Fabricant / Laboratoire', border: OutlineInputBorder()),
+                              onSaved: (value) => _fabricant = value,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _amm,
+                              decoration: const InputDecoration(labelText: 'AMM / Référence', border: OutlineInputBorder()),
+                              onSaved: (value) => _amm = value,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              initialValue: _statutPrescription,
+                              decoration: const InputDecoration(labelText: 'Statut (ordonnance/OTC)', border: OutlineInputBorder()),
+                              onSaved: (value) => _statutPrescription = value,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
                             child: DropdownButtonFormField<String>(
                               key: _categorieFieldKey,
                               decoration: const InputDecoration(labelText: 'Catégorie *', border: OutlineInputBorder()),
@@ -756,6 +891,70 @@ class _ProductDialogState extends State<ProductDialog> {
                         ),
                         onChanged: (value) => _codeBarres = value,
                         onSaved: (value) => _codeBarres = value,
+                      ),
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade300),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Lot et péremption (optionnel)', style: TextStyle(fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: _lotNumero,
+                                    decoration: const InputDecoration(labelText: 'N° de lot', border: OutlineInputBorder()),
+                                    onSaved: (value) => _lotNumero = value,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: TextFormField(
+                                    initialValue: _lotQuantite == 0 ? '' : _lotQuantite.toString(),
+                                    decoration: const InputDecoration(labelText: 'Quantité lot', border: OutlineInputBorder()),
+                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9,. ]'))],
+                                    onSaved: (value) => _lotQuantite = _parseDoubleLocale(value) ?? 0.0,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    onPressed: () async {
+                                      final picked = await showDatePicker(
+                                        context: context,
+                                        initialDate: _lotExpiration ?? DateTime.now().add(const Duration(days: 365)),
+                                        firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                                        lastDate: DateTime.now().add(const Duration(days: 3650)),
+                                      );
+                                      if (picked != null) {
+                                        setState(() {
+                                          _lotExpiration = picked;
+                                        });
+                                      }
+                                    },
+                                    icon: const Icon(Icons.event),
+                                    label: Text(
+                                      _lotExpiration == null
+                                          ? 'Date de péremption'
+                                          : DateFormat('dd/MM/yyyy').format(_lotExpiration!),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                       const SizedBox(height: 16),
                       Row(

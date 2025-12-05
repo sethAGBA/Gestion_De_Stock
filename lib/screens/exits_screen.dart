@@ -140,6 +140,9 @@ class _ExitsScreenState extends State<ExitsScreen> {
                     final label = _filters[typeKey] ?? _filters['other']!;
                     final exitText =
                         '${label}: ${_numberFormat.format(exit['quantite'])} le $formattedDate';
+                    final lotInfo = exit['numeroLot'] != null && (exit['numeroLot'] as String).isNotEmpty
+                        ? 'Lot: ${exit['numeroLot']}'
+                        : null;
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -147,6 +150,11 @@ class _ExitsScreenState extends State<ExitsScreen> {
                           exitText,
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
+                        if (lotInfo != null)
+                          Text(
+                            lotInfo,
+                            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+                          ),
                         if (exit['raison'] != null && (exit['raison'] as String).isNotEmpty)
                           _highlightText(
                             'Raison: ${exit['raison']}',
@@ -1200,6 +1208,9 @@ class _AddExitDialog extends StatelessWidget {
     final productSearchController = TextEditingController();
     String productSearchQuery = '';
 
+    List<Map<String, dynamic>> availableLots = [];
+    Map<String, dynamic>? selectedLot;
+
     return StatefulBuilder(
       builder: (context, setDialogState) => AlertDialog(
         title: const Text('Nouvelle sortie de stock'),
@@ -1261,6 +1272,18 @@ class _AddExitDialog extends StatelessWidget {
                 onChanged: (value) {
                   setDialogState(() {
                     selectedProduit = value;
+                    // Recharger les lots disponibles pour ce produit
+                    () async {
+                      final db = await DatabaseHelper.database;
+                      availableLots = await db.query(
+                        'lots',
+                        where: 'produitId = ? AND quantiteDisponible > 0',
+                        whereArgs: [value?.id],
+                        orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+                      );
+                      selectedLot = availableLots.isNotEmpty ? availableLots.first : null;
+                      setDialogState(() {});
+                    }();
                     isValid = _validateForm(selectedProduit, selectedType, quantite);
                   });
                 },
@@ -1268,6 +1291,37 @@ class _AddExitDialog extends StatelessWidget {
                 isExpanded: true,
                 hint: const Text('Sélectionnez un produit'),
               ),
+              if (selectedProduit != null && availableLots.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<Map<String, dynamic>>(
+                  decoration: InputDecoration(
+                    labelText: 'Lot (FEFO par défaut)',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    filled: true,
+                    fillColor: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
+                  ),
+                  value: selectedLot,
+                  items: availableLots
+                      .map(
+                        (lot) => DropdownMenuItem(
+                          value: lot,
+                          child: Text(
+                            '${lot['numeroLot']}'
+                            '${lot['dateExpiration'] != null ? ' - exp: ${DateFormat('dd/MM/yy').format(DateTime.fromMillisecondsSinceEpoch(lot['dateExpiration'] as int))}' : ''}'
+                            ' • dispo: ${(lot['quantiteDisponible'] as num).toDouble()}',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (lot) {
+                    setDialogState(() {
+                      selectedLot = lot;
+                    });
+                  },
+                ),
+              ],
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
                 decoration: InputDecoration(
@@ -1349,15 +1403,17 @@ class _AddExitDialog extends StatelessWidget {
             onPressed: isValid
                 ? () async {
                     try {
-                      final exit = StockExit(
-                        produitId: selectedProduit!.id!,
-                        produitNom: selectedProduit!.nom,
-                        quantite: quantite!,
-                        type: selectedType!,
-                        raison: raison.isEmpty ? null : raison,
-                        date: DateTime.now(),
-                        utilisateur: currentUserName,
-                      );
+                          final exit = StockExit(
+                            produitId: selectedProduit!.id!,
+                            produitNom: selectedProduit!.nom,
+                            quantite: quantite!,
+                            type: selectedType!,
+                            raison: raison.isEmpty ? null : raison,
+                            date: DateTime.now(),
+                            utilisateur: currentUserName,
+                            lotId: selectedLot?['id'] as int?,
+                            numeroLot: selectedLot?['numeroLot'] as String?,
+                          );
                       await DatabaseHelper.addStockExit(exit);
                       if (context.mounted) {
                         Navigator.pop(context);

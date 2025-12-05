@@ -31,6 +31,8 @@ class Produit {
   final String? conditionnement;
   final String? cip;
   final String? fabricant;
+  final String? amm;
+  final String? statutPrescription;
   final String unite;
   final String? conditionnementLabel;
   final double conditionnementQuantite;
@@ -68,6 +70,8 @@ class Produit {
     this.conditionnement,
     this.cip,
     this.fabricant,
+    this.amm,
+    this.statutPrescription,
     required this.unite,
     this.conditionnementLabel,
     this.conditionnementQuantite = 0.0,
@@ -107,6 +111,8 @@ class Produit {
       'conditionnement': conditionnement,
       'cip': cip,
       'fabricant': fabricant,
+      'amm': amm,
+      'statutPrescription': statutPrescription,
       'unite': unite,
       'conditionnementLabel': conditionnementLabel,
       'conditionnementQuantite': conditionnementQuantite,
@@ -147,6 +153,8 @@ class Produit {
       conditionnement: map['conditionnement'] as String?,
       cip: map['cip'] as String?,
       fabricant: map['fabricant'] as String?,
+      amm: map['amm'] as String?,
+      statutPrescription: map['statutPrescription'] as String?,
       unite: map['unite'] as String? ?? '',
       conditionnementLabel: map['conditionnementLabel'] as String?,
       conditionnementQuantite: (map['conditionnementQuantite'] as num?)?.toDouble() ?? 0.0,
@@ -174,6 +182,48 @@ class Produit {
           ? DateTime.fromMillisecondsSinceEpoch((map['derniereSortie'] as num).toInt())
           : null,
       statut: map['statut'] as String? ?? 'disponible',
+    );
+  }
+}
+
+class Lot {
+  final int id;
+  final int produitId;
+  final String numeroLot;
+  final DateTime? dateExpiration;
+  final double quantite;
+  final double quantiteDisponible;
+
+  Lot({
+    required this.id,
+    required this.produitId,
+    required this.numeroLot,
+    this.dateExpiration,
+    required this.quantite,
+    required this.quantiteDisponible,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id == 0 ? null : id,
+      'produitId': produitId,
+      'numeroLot': numeroLot,
+      'dateExpiration': dateExpiration?.millisecondsSinceEpoch,
+      'quantite': quantite,
+      'quantiteDisponible': quantiteDisponible,
+    };
+  }
+
+  factory Lot.fromMap(Map<String, dynamic> map) {
+    return Lot(
+      id: (map['id'] as num?)?.toInt() ?? 0,
+      produitId: (map['produitId'] as num?)?.toInt() ?? 0,
+      numeroLot: map['numeroLot'] as String? ?? '',
+      dateExpiration: map['dateExpiration'] != null
+          ? DateTime.fromMillisecondsSinceEpoch(map['dateExpiration'] as int)
+          : null,
+      quantite: (map['quantite'] as num?)?.toDouble() ?? 0,
+      quantiteDisponible: (map['quantiteDisponible'] as num?)?.toDouble() ?? 0,
     );
   }
 }
@@ -683,6 +733,8 @@ class StockExit {
   final String? raison;
   final DateTime date;
   final String utilisateur;
+  final int? lotId;
+  final String? numeroLot;
 
   StockExit({
     this.id,
@@ -693,6 +745,8 @@ class StockExit {
     this.raison,
     required this.date,
     required this.utilisateur,
+    this.lotId,
+    this.numeroLot,
   });
 
   factory StockExit.fromMap(Map<String, dynamic> map) {
@@ -705,6 +759,8 @@ class StockExit {
       raison: map['raison'] as String?,
       date: DateTime.fromMillisecondsSinceEpoch((map['date'] as num?)?.toInt() ?? 0),
       utilisateur: map['utilisateur'] as String? ?? '',
+      lotId: map['lotId'] as int?,
+      numeroLot: map['numeroLot'] as String?,
     );
   }
 
@@ -718,6 +774,8 @@ class StockExit {
       'raison': raison,
       'date': date.millisecondsSinceEpoch,
       'utilisateur': utilisateur,
+      'lotId': lotId,
+      'numeroLot': numeroLot,
     };
   }
 }

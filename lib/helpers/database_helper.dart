@@ -5,6 +5,7 @@ import 'package:stock_management/data/data_initializer.dart';
 import '../models/models.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
+import 'dart:math';
 
 class DatabaseHelper {
   static Database? _database;
@@ -32,7 +33,7 @@ class DatabaseHelper {
     print('Initialisation de la base de données à : $pathDb');
     return await openDatabase(
       pathDb,
-      version: 24,
+      version: 26,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (db) async {
@@ -67,6 +68,14 @@ class DatabaseHelper {
         imageUrl TEXT,
         sku TEXT,
         codeBarres TEXT,
+        dci TEXT,
+        forme TEXT,
+        dosage TEXT,
+        conditionnement TEXT,
+        cip TEXT,
+        fabricant TEXT,
+        amm TEXT,
+        statutPrescription TEXT,
         unite TEXT NOT NULL,
         conditionnementLabel TEXT,
         conditionnementQuantite REAL NOT NULL DEFAULT 0.0,
@@ -88,6 +97,17 @@ class DatabaseHelper {
         derniereEntree INTEGER,
         derniereSortie INTEGER,
         statut TEXT NOT NULL
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS lots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        produitId INTEGER NOT NULL,
+        numeroLot TEXT NOT NULL,
+        dateExpiration INTEGER,
+        quantite REAL NOT NULL DEFAULT 0,
+        quantiteDisponible REAL NOT NULL DEFAULT 0,
+        FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
     await db.execute('''
@@ -227,6 +247,8 @@ class DatabaseHelper {
         raison TEXT,
         date INTEGER NOT NULL,
         utilisateur TEXT NOT NULL,
+        lotId INTEGER,
+        numeroLot TEXT,
         FOREIGN KEY (produitId) REFERENCES produits(id)
       )
     ''');
@@ -684,6 +706,48 @@ class DatabaseHelper {
       final names = cols.map((c) => c['name'] as String).toList();
       if (!names.contains('uniteVente')) {
         await db.execute('ALTER TABLE bon_commande_items ADD COLUMN uniteVente TEXT');
+      }
+    }
+    if (oldVersion < 25) {
+      print('Migration vers version 25 : champs pharma et lots');
+      final prodCols = await db.rawQuery('PRAGMA table_info(produits)');
+      final prodNames = prodCols.map((c) => c['name'] as String).toList();
+      final needed = {
+        'dci': 'TEXT',
+        'forme': 'TEXT',
+        'dosage': 'TEXT',
+        'conditionnement': 'TEXT',
+        'cip': 'TEXT',
+        'fabricant': 'TEXT',
+        'amm': 'TEXT',
+        'statutPrescription': 'TEXT',
+      };
+      for (final entry in needed.entries) {
+        if (!prodNames.contains(entry.key)) {
+          await db.execute('ALTER TABLE produits ADD COLUMN ${entry.key} ${entry.value}');
+        }
+      }
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS lots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          produitId INTEGER NOT NULL,
+          numeroLot TEXT NOT NULL,
+          dateExpiration INTEGER,
+          quantite REAL NOT NULL DEFAULT 0,
+          quantiteDisponible REAL NOT NULL DEFAULT 0,
+          FOREIGN KEY (produitId) REFERENCES produits(id)
+        )
+      ''');
+    }
+    if (oldVersion < 26) {
+      print('Migration vers version 26 : lotId/numeroLot dans stock_exits');
+      final exitCols = await db.rawQuery('PRAGMA table_info(stock_exits)');
+      final exitNames = exitCols.map((c) => c['name'] as String).toList();
+      if (!exitNames.contains('lotId')) {
+        await db.execute('ALTER TABLE stock_exits ADD COLUMN lotId INTEGER');
+      }
+      if (!exitNames.contains('numeroLot')) {
+        await db.execute('ALTER TABLE stock_exits ADD COLUMN numeroLot TEXT');
       }
     }
     if (oldVersion < 20) {
@@ -1773,16 +1837,61 @@ class DatabaseHelper {
         if (produit.isEmpty) throw Exception('Produit non trouvé');
         final currentStock = (produit.first['quantiteStock'] as num).toInt();
         if (currentStock < exit.quantite) throw Exception('Stock insuffisant');
-        await txn.update(
-          'produits',
-          {'quantiteStock': currentStock - exit.quantite},
-          where: 'id = ?',
-          whereArgs: [exit.produitId],
-        );
-        await txn.insert('stock_exits', exit.toMap());
-      });
-      print('Sortie de stock ajoutée avec succès');
-    } catch (e) {
+
+        // Décrémenter les lots : si lotId fourni, cibler ce lot, sinon FEFO
+        int remaining = exit.quantite;
+        if (exit.lotId != null) {
+          final lot = await txn.query(
+            'lots',
+            where: 'id = ? AND produitId = ?',
+            whereArgs: [exit.lotId, exit.produitId],
+          );
+          if (lot.isEmpty) throw Exception('Lot non trouvé pour ce produit');
+          final dispo = (lot.first['quantiteDisponible'] as num?)?.toDouble() ?? 0;
+          if (dispo < remaining) throw Exception('Quantité insuffisante dans ce lot');
+          final newDispo = dispo - remaining;
+          await txn.update(
+            'lots',
+            {'quantiteDisponible': newDispo},
+            where: 'id = ?',
+            whereArgs: [exit.lotId],
+          );
+        } else {
+          final lots = await txn.query(
+            'lots',
+            where: 'produitId = ? AND quantiteDisponible > 0',
+            whereArgs: [exit.produitId],
+            orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+          );
+          for (final lot in lots) {
+            if (remaining <= 0) break;
+            final dispo = (lot['quantiteDisponible'] as num?)?.toDouble() ?? 0;
+            if (dispo <= 0) continue;
+            final use = min(dispo, remaining.toDouble());
+            final newDispo = dispo - use;
+            await txn.update(
+              'lots',
+              {'quantiteDisponible': newDispo},
+              where: 'id = ?',
+              whereArgs: [lot['id']],
+            );
+            remaining -= use.toInt();
+          }
+          if (remaining > 0 && lots.isNotEmpty) {
+            throw Exception('Stock par lot insuffisant pour satisfaire la quantité demandée');
+          }
+        }
+
+      await txn.update(
+        'produits',
+        {'quantiteStock': currentStock - exit.quantite},
+        where: 'id = ?',
+        whereArgs: [exit.produitId],
+      );
+      await txn.insert('stock_exits', exit.toMap());
+    });
+    print('Sortie de stock ajoutée avec succès');
+  } catch (e) {
       print('Erreur lors de l\'ajout de la sortie de stock : $e');
       throw e;
     }

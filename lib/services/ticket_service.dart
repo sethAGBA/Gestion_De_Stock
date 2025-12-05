@@ -208,6 +208,8 @@ class TicketService {
     required double quantite,
     required double prixUnitaire,
     required double total,
+    String? lot,
+    DateTime? expiration,
     required NumberFormat formatter,
     required NumberFormat qtyFormatter,
     required pw.Font timesBold,
@@ -234,6 +236,14 @@ class TicketService {
           ),
         ],
       ),
+      if ((lot != null && lot.isNotEmpty) || expiration != null)
+        pw.Text(
+          [
+            if (lot != null && lot.isNotEmpty) 'Lot: $lot',
+            if (expiration != null) 'Exp: ${DateFormat('dd/MM/yy').format(expiration)}',
+          ].join(' • '),
+          style: pw.TextStyle(font: times, fontSize: _fontSizeTiny, color: PdfColors.grey700),
+        ),
       
       pw.SizedBox(height: 3),
     ];
@@ -534,12 +544,18 @@ class TicketService {
               final nomProduit = item['produitNom']?.toString() ?? 
                                  item['nom']?.toString() ?? 
                                  'Produit';
+              final lot = (item['lot'] ?? item['numeroLot'])?.toString();
+              final exp = item['dateExpiration'] is int
+                  ? DateTime.fromMillisecondsSinceEpoch(item['dateExpiration'] as int)
+                  : null;
               
               return _buildProductLine(
                 nom: nomProduit,
                 quantite: q,
                 prixUnitaire: pu,
                 total: totalLigne,
+                lot: lot,
+                expiration: exp,
                 formatter: formatter,
                 qtyFormatter: qtyFormatter,
                 timesBold: timesBold,

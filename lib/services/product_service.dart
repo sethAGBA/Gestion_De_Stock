@@ -15,7 +15,7 @@ class ProductService {
     print('Initialisation de la base de données...');
     return openDatabase(
       path.join(await getDatabasesPath(), 'dashboard.db'),
-      version: 18, // Bump for prixVenteGros/seuilGros + tarifMode
+      version: 26, // Align with DatabaseHelper for pharma fields/lots and stock_exits lotId
       onCreate: (db, version) async {
         print('Création des tables pour version $version...');
         await db.transaction((txn) async {
@@ -29,6 +29,14 @@ class ProductService {
               imageUrl TEXT,
               sku TEXT,
               codeBarres TEXT,
+              dci TEXT,
+              forme TEXT,
+              dosage TEXT,
+              conditionnement TEXT,
+              cip TEXT,
+              fabricant TEXT,
+              amm TEXT,
+              statutPrescription TEXT,
               unite TEXT NOT NULL,
               quantiteStock INTEGER NOT NULL DEFAULT 0,
               quantiteAvariee INTEGER NOT NULL DEFAULT 0,
@@ -47,6 +55,17 @@ class ProductService {
               derniereEntree INTEGER,
               derniereSortie INTEGER,
               statut TEXT NOT NULL
+            )
+          ''');
+          await txn.execute('''
+            CREATE TABLE IF NOT EXISTS lots (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              produitId INTEGER NOT NULL,
+              numeroLot TEXT NOT NULL,
+              dateExpiration INTEGER,
+              quantite REAL NOT NULL DEFAULT 0,
+              quantiteDisponible REAL NOT NULL DEFAULT 0,
+              FOREIGN KEY (produitId) REFERENCES produits(id)
             )
           ''');
           await txn.execute('''
@@ -189,6 +208,8 @@ class ProductService {
               raison TEXT,
               date INTEGER NOT NULL,
               utilisateur TEXT NOT NULL,
+              lotId INTEGER,
+              numeroLot TEXT,
               FOREIGN KEY (produitId) REFERENCES produits(id)
             )
           ''');
@@ -382,6 +403,46 @@ class ProductService {
             final names = cols.map((c) => c['name'] as String).toList();
             if (!names.contains('tarifMode')) {
               await txn.execute('ALTER TABLE bon_commande_items ADD COLUMN tarifMode TEXT');
+            }
+          }
+          if (oldVersion < 19) {
+            final prodCols = await db.rawQuery('PRAGMA table_info(produits)');
+            final prodNames = prodCols.map((c) => c['name'] as String).toList();
+            final needed = {
+              'dci': 'TEXT',
+              'forme': 'TEXT',
+              'dosage': 'TEXT',
+              'conditionnement': 'TEXT',
+              'cip': 'TEXT',
+              'fabricant': 'TEXT',
+              'amm': 'TEXT',
+              'statutPrescription': 'TEXT',
+            };
+            for (final entry in needed.entries) {
+              if (!prodNames.contains(entry.key)) {
+                await txn.execute('ALTER TABLE produits ADD COLUMN ${entry.key} ${entry.value}');
+              }
+            }
+            await txn.execute('''
+              CREATE TABLE IF NOT EXISTS lots (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                produitId INTEGER NOT NULL,
+                numeroLot TEXT NOT NULL,
+                dateExpiration INTEGER,
+                quantite REAL NOT NULL DEFAULT 0,
+                quantiteDisponible REAL NOT NULL DEFAULT 0,
+                FOREIGN KEY (produitId) REFERENCES produits(id)
+              )
+            ''');
+          }
+          if (oldVersion < 26) {
+            final exitCols = await db.rawQuery('PRAGMA table_info(stock_exits)');
+            final exitNames = exitCols.map((c) => c['name'] as String).toList();
+            if (!exitNames.contains('lotId')) {
+              await txn.execute('ALTER TABLE stock_exits ADD COLUMN lotId INTEGER');
+            }
+            if (!exitNames.contains('numeroLot')) {
+              await txn.execute('ALTER TABLE stock_exits ADD COLUMN numeroLot TEXT');
             }
           }
           if (oldVersion < 5) {
@@ -734,6 +795,17 @@ class ProductService {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.query('produits');
     return List.generate(maps.length, (i) => Produit.fromMap(maps[i]));
+  }
+
+  Future<void> addLot(Lot lot) async {
+    final db = await database;
+    await db.insert('lots', lot.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<List<Lot>> getLotsByProduit(int produitId) async {
+    final db = await database;
+    final rows = await db.query('lots', where: 'produitId = ?', whereArgs: [produitId]);
+    return rows.map((e) => Lot.fromMap(e)).toList();
   }
 
   Future<List<String>> getUnites() async {

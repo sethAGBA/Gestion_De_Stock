@@ -412,6 +412,10 @@ class ModernInvoiceService {
             final nom = item['produitNom']?.toString() ?? 
                         item['nom']?.toString() ?? 
                         'Produit';
+            final lot = item['lot'] ?? item['numeroLot'];
+            final exp = item['dateExpiration'] is int
+                ? DateTime.fromMillisecondsSinceEpoch(item['dateExpiration'] as int)
+                : null;
             
             return pw.TableRow(
               decoration: pw.BoxDecoration(
@@ -419,7 +423,27 @@ class ModernInvoiceService {
               ),
               children: [
                 _buildTableCell('${index + 1}', times),
-                _buildTableCell(nom, times, align: pw.TextAlign.left),
+                pw.Padding(
+                  padding: const pw.EdgeInsets.all(10),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        nom,
+                        style: pw.TextStyle(font: times, fontSize: 9),
+                        textAlign: pw.TextAlign.left,
+                      ),
+                      if (lot != null || exp != null)
+                        pw.Text(
+                          [
+                            if (lot != null) 'Lot: $lot',
+                            if (exp != null) 'Exp: ${DateFormat('dd/MM/yy').format(exp)}',
+                          ].join(' • '),
+                          style: pw.TextStyle(font: times, fontSize: 7, color: PdfColors.grey700),
+                        ),
+                    ],
+                  ),
+                ),
                 _buildTableCell('${formatter.format(pu)} FCFA', times, align: pw.TextAlign.right),
                 _buildTableCell(qtyFormatter.format(q), times, align: pw.TextAlign.center),
                 _buildTableCell('${formatter.format(total)} FCFA', times, align: pw.TextAlign.right),

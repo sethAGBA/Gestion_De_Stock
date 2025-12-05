@@ -26,6 +26,8 @@ class _ProductsScreenState extends State<ProductsScreen> {
   late Future<List<Produit>> _produitsFuture;
   List<Produit> _filteredProduits = [];
   User? _currentUser;
+  Map<int, int> _lotCounts = {};
+  Map<int, DateTime?> _lotMinExp = {};
 
   String get _currentUserName => _currentUser?.name ?? 'Utilisateur';
 
@@ -36,10 +38,396 @@ class _ProductsScreenState extends State<ProductsScreen> {
     return unite.toLowerCase() == 'kg' ? '$s kg' : s;
   }
 
+  Widget _buildSummaryCard(BuildContext context,
+      {required String title,
+      required String value,
+      required Color color,
+      required IconData icon}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Container(
+                                            width: 180,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? color.withOpacity(0.2) : color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.5)),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            backgroundColor: color,
+            radius: 18,
+            child: Icon(icon, color: Colors.white, size: 18),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.grey.shade800)),
+              Text(
+                value,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : Colors.black87,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.grey)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value.isEmpty ? '-' : value,
+              textAlign: TextAlign.right,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showEnlargedImage(BuildContext context, String? imagePath) {
+    if (imagePath == null || imagePath.isEmpty || !File(imagePath).existsSync()) return;
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        insetPadding: const EdgeInsets.all(24),
+        child: InteractiveViewer(
+          child: Image.file(File(imagePath)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBadge(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+          color: color,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showProductDetails(BuildContext context, Produit produit) async {
+    final currency = NumberFormat('#,##0.00', 'fr_FR');
+    final lots = await _database.query(
+      'lots',
+      where: 'produitId = ?',
+      whereArgs: [produit.id],
+      orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+    );
+
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (ctx) {
+        final isDarkMode = Theme.of(ctx).brightness == Brightness.dark;
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Container(
+            width: 740,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 90,
+                      height: 90,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade200,
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: (produit.imageUrl != null && produit.imageUrl!.isNotEmpty && File(produit.imageUrl!).existsSync())
+                          ? Image.file(File(produit.imageUrl!), fit: BoxFit.cover)
+                          : Icon(Icons.inventory_2_outlined, color: Colors.blue.shade600),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(produit.nom, style: Theme.of(ctx).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 4,
+                            children: [
+                              Chip(label: Text(produit.categorie)),
+                              if (produit.statutPrescription?.isNotEmpty ?? false) Chip(label: Text(produit.statutPrescription!)),
+                              if (produit.dci?.isNotEmpty ?? false) Chip(label: Text('DCI: ${produit.dci}')),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _infoRow('Forme', produit.forme ?? '-'),
+                          _infoRow('Dosage', produit.dosage ?? '-'),
+                          _infoRow('Conditionnement', produit.conditionnement ?? '-'),
+                          _infoRow('CIP/GTIN', produit.cip ?? '-'),
+                          _infoRow('Fabricant', produit.fabricant ?? '-'),
+                          _infoRow('AMM', produit.amm ?? '-'),
+                          _infoRow('Statut', produit.statutPrescription ?? '-'),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          _infoRow('SKU', produit.sku ?? '-'),
+                          _infoRow('Code-barres', produit.codeBarres ?? '-'),
+                          _infoRow('Unité', produit.unite),
+                          _infoRow('Stock', '${produit.quantiteStock}'),
+                          _infoRow('Avarié', '${produit.quantiteAvariee}'),
+                          _infoRow('Prix vente', '${currency.format(produit.prixVente)} FCFA'),
+                          if (produit.prixVenteGros > 0) _infoRow('Prix gros', '${currency.format(produit.prixVenteGros)} FCFA'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                if (produit.description != null && produit.description!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('Description', style: Theme.of(ctx).textTheme.titleMedium),
+                  const SizedBox(height: 4),
+                  Text(produit.description!),
+                ],
+                const SizedBox(height: 12),
+                if (lots.isNotEmpty) ...[
+                  Text('Lots', style: Theme.of(ctx).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 140,
+                    child: ListView.separated(
+                      itemCount: lots.length,
+                      separatorBuilder: (_, __) => const Divider(),
+                      itemBuilder: (context, index) {
+                        final lot = lots[index];
+                        final exp = lot['dateExpiration'] != null
+                            ? DateTime.fromMillisecondsSinceEpoch(lot['dateExpiration'] as int)
+                            : null;
+                        return Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text('Lot ${lot['numeroLot']}'),
+                            Text(
+                              'Dispo: ${(lot['quantiteDisponible'] as num).toDouble()}'
+                              '${exp != null ? ' • exp: ${DateFormat('dd/MM/yy').format(exp)}' : ''}',
+                              style: TextStyle(
+                                color: exp != null && exp.isBefore(DateTime.now().add(const Duration(days: 30)))
+                                    ? Colors.red
+                                    : Colors.grey.shade700,
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showEnlargedImage(ctx, produit.imageUrl),
+                    icon: const Icon(Icons.zoom_in),
+                    label: Text(
+                      'Voir l\'image',
+                      style: TextStyle(color: isDarkMode ? Colors.blue.shade200 : Colors.blue.shade700),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   double? _parseDoubleLocale(String? input) {
     if (input == null) return null;
     final normalized = input.replaceAll(' ', '').replaceAll(',', '.');
     return double.tryParse(normalized);
+  }
+
+  Future<void> _showLotsDialog(BuildContext context, Produit produit) async {
+    final dateFormat = DateFormat('dd/MM/yyyy');
+    List<Map<String, dynamic>> lots = [];
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        String? numeroLot;
+        DateTime? expiration;
+        double quantite = 0;
+
+        Future<void> loadLots() async {
+          lots = await _database.query(
+            'lots',
+            where: 'produitId = ?',
+            whereArgs: [produit.id],
+            orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+          );
+        }
+
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return FutureBuilder(
+              future: loadLots(),
+              builder: (context, snapshot) {
+                return AlertDialog(
+                  title: Text('Lots - ${produit.nom}'),
+                  content: SizedBox(
+                    width: 500,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (lots.isNotEmpty)
+                          SizedBox(
+                            height: 200,
+                            child: ListView.separated(
+                              itemCount: lots.length,
+                              separatorBuilder: (_, __) => const Divider(),
+                              itemBuilder: (context, index) {
+                                final lot = lots[index];
+                                final exp = lot['dateExpiration'] != null
+                                    ? DateTime.fromMillisecondsSinceEpoch(lot['dateExpiration'] as int)
+                                    : null;
+                                return ListTile(
+                                  dense: true,
+                                  title: Text('Lot: ${lot['numeroLot']}'),
+                                  subtitle: Text(
+                                    'Quantité: ${lot['quantiteDisponible']} / ${lot['quantite']}'
+                                    '${exp != null ? ' - Péremption: ${dateFormat.format(exp)}' : ''}',
+                                  ),
+                                );
+                              },
+                            ),
+                          )
+                        else
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 12),
+                            child: Text('Aucun lot enregistré'),
+                          ),
+                        const SizedBox(height: 12),
+                        const Divider(),
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text('Ajouter un lot', style: Theme.of(context).textTheme.titleSmall),
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          decoration: const InputDecoration(labelText: 'Numéro de lot'),
+                          onChanged: (v) => numeroLot = v,
+                        ),
+                        const SizedBox(height: 8),
+                        TextField(
+                          decoration: const InputDecoration(labelText: 'Quantité'),
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          onChanged: (v) => quantite = double.tryParse(v.replaceAll(',', '.')) ?? 0,
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            final picked = await showDatePicker(
+                              context: context,
+                              initialDate: expiration ?? DateTime.now().add(const Duration(days: 365)),
+                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              lastDate: DateTime.now().add(const Duration(days: 3650)),
+                            );
+                            if (picked != null) {
+                              setStateDialog(() {
+                                expiration = picked;
+                              });
+                            }
+                          },
+                          icon: const Icon(Icons.event),
+                          label: Text(
+                            expiration == null ? 'Date de péremption' : dateFormat.format(expiration!),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: const Text('Fermer'),
+                    ),
+                    ElevatedButton(
+                      onPressed: () async {
+                        if ((numeroLot == null || numeroLot!.isEmpty) || quantite <= 0) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Numéro de lot et quantité requis')),
+                          );
+                          return;
+                        }
+                        await _database.insert('lots', {
+                          'produitId': produit.id,
+                          'numeroLot': numeroLot,
+                          'dateExpiration': expiration?.millisecondsSinceEpoch,
+                          'quantite': quantite,
+                          'quantiteDisponible': quantite,
+                        });
+                        setState(() {
+                          _produitsFuture = _getProducts();
+                        });
+                        setStateDialog(() {});
+                      },
+                      child: const Text('Enregistrer le lot'),
+                    ),
+                  ],
+                );
+              },
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -52,6 +440,7 @@ class _ProductsScreenState extends State<ProductsScreen> {
       setState(() {
         _produitsFuture = _getProducts();
         _loadUnitesAndCategories();
+        _loadLotSummaries();
       });
     }).catchError((e) {
       print('Erreur lors de l\'initialisation : $e');
@@ -107,6 +496,31 @@ class _ProductsScreenState extends State<ProductsScreen> {
           SnackBar(content: Text('Erreur lors de l\'export : $e')),
         );
       }
+    }
+  }
+
+  Future<void> _loadLotSummaries() async {
+    try {
+      final rows = await _database.rawQuery('''
+        SELECT produitId, COUNT(*) as countLots,
+               MIN(dateExpiration) as minExp
+        FROM lots
+        GROUP BY produitId
+      ''');
+      final counts = <int, int>{};
+      final minExp = <int, DateTime?>{};
+      for (final row in rows) {
+        final pid = (row['produitId'] as num).toInt();
+        counts[pid] = (row['countLots'] as num?)?.toInt() ?? 0;
+        final expRaw = row['minExp'] as int?;
+        minExp[pid] = expRaw != null ? DateTime.fromMillisecondsSinceEpoch(expRaw) : null;
+      }
+      setState(() {
+        _lotCounts = counts;
+        _lotMinExp = minExp;
+      });
+    } catch (e) {
+      print('Erreur lors du chargement des lots: $e');
     }
   }
 
@@ -914,6 +1328,13 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         final produits = _filteredProduits.isNotEmpty || _searchController.text.isNotEmpty
                             ? _filteredProduits
                             : snapshot.data!;
+                        final now = DateTime.now();
+                        final lowStockCount = produits.where((p) => p.quantiteStock <= p.seuilAlerte).length;
+                        final avariesCount = produits.where((p) => p.quantiteAvariee > 0).length;
+                        final lotAlertCount = _lotMinExp.entries
+                            .where((e) => e.value != null && e.value!.isBefore(now.add(const Duration(days: 30))))
+                            .length;
+                        final totalLots = _lotCounts.values.fold<int>(0, (a, b) => a + b);
                         if (produits.isEmpty && _searchController.text.isNotEmpty) {
                           return SliverFillRemaining(
                             child: Center(
@@ -940,149 +1361,245 @@ class _ProductsScreenState extends State<ProductsScreen> {
                         }
                         print('Affichage des produits : ${produits.map((p) => p.nom).toList()}');
                         return SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final produit = produits[index];
-                              final isLowStock = produit.quantiteStock <= produit.seuilAlerte;
-                              final hasDamaged = produit.quantiteAvariee > 0;
-                              return Container(
-                                decoration: BoxDecoration(
-                                  color: hasDamaged ? Colors.red.withOpacity(0.05) : null,
-                                  border: Border(bottom: BorderSide(color: isDarkMode ? Colors.grey.shade700 : Colors.grey.shade200)),
+                          delegate: SliverChildListDelegate(
+                            [
+                              // Summary bar
+                              Container(
+                                margin: const EdgeInsets.only(bottom: 12),
+                                child: Wrap(
+                                  spacing: 12,
+                                  runSpacing: 12,
+                                  children: [
+                                    _buildSummaryCard(
+                                      context,
+                                      title: 'Produits',
+                                      value: produits.length.toString(),
+                                      color: const Color(0xFF0E5A8A),
+                                      icon: Icons.inventory_2_outlined,
+                                    ),
+                                    _buildSummaryCard(
+                                      context,
+                                      title: 'Stock bas',
+                                      value: lowStockCount.toString(),
+                                      color: Colors.orange,
+                                      icon: Icons.warning_amber_rounded,
+                                    ),
+                                    _buildSummaryCard(
+                                      context,
+                                      title: 'Lots',
+                                      value: '$totalLots (${lotAlertCount} à surveiller)',
+                                      color: Colors.green.shade700,
+                                      icon: Icons.qr_code_2,
+                                    ),
+                                    _buildSummaryCard(
+                                      context,
+                                      title: 'Avariés',
+                                      value: avariesCount.toString(),
+                                      color: Colors.red.shade700,
+                                      icon: Icons.report_problem_outlined,
+                                    ),
+                                  ],
                                 ),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.nom,
-                                            _searchController.text,
-                                            const TextStyle(fontWeight: FontWeight.w500),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.categorie,
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            _fmtQty(produit.quantiteStock, produit.unite),
-                                            style: TextStyle(
-                                              color: isLowStock ? Colors.red : null,
-                                              fontWeight: isLowStock ? FontWeight.bold : null,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            _fmtQty(produit.quantiteAvariee, produit.unite),
-                                            style: TextStyle(
-                                              color: hasDamaged ? Colors.red : null,
-                                              fontWeight: hasDamaged ? FontWeight.bold : null,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Text(
-                                            '${NumberFormat('#,##0.00', 'fr_FR').format(produit.prixVente)}\u00A0FCFA',
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: _highlightText(
-                                            produit.fournisseurPrincipal ?? 'N/A',
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 80,
-                                          child: _highlightText(
-                                            produit.statut,
-                                            _searchController.text,
-                                            const TextStyle(),
-                                            isDarkMode,
-                                          ),
-                                        ),
-                                        SizedBox(
-                                          width: 120,
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              IconButton(
-                                                icon: const Icon(CupertinoIcons.pen, color: Color(0xFF0E5A8A), size: 20),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () => showDialog(
-                                                  context: context,
-                                                  builder: (context) => ProductDialog(
-                                                    database: _database,
-                                                    unites: _unites,
-                                                    categories: _categories,
-                                                    statuts: _statuts,
-                                                    produit: produit,
-                                                    onProductSaved: () {
-                                                      setState(() {
-                                                        _produitsFuture = _getProducts();
-                                                        _loadUnitesAndCategories();
-                                                      });
-                                                    },
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 10),
-                                              IconButton(
-                                                icon: const Icon(CupertinoIcons.exclamationmark_triangle, color: Colors.orange, size: 20),
-                                                padding: EdgeInsets.zero,
-                                                constraints: const BoxConstraints(),
-                                                onPressed: () => _declareDamaged(produit),
-                                              ),
-                                              const SizedBox(width: 10),
-                                              PopupMenuButton<String>(
-                                                icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
-                                                onSelected: (value) => _handleDamagedAction(produit, value),
-                                                itemBuilder: (context) => [
-                                                  if (produit.quantiteAvariee > 0)
-                                                    const PopupMenuItem(
-                                                      value: 'retour',
-                                                      child: Text('Retour au fournisseur'),
-                                                    ),
-                                                  if (produit.quantiteAvariee > 0)
-                                                    const PopupMenuItem(
-                                                      value: 'detruit',
-                                                      child: Text('Marquer comme détruit'),
-                                                    ),
-                                                ],
-                                              ),
-                                            ],
-                                          ),
+                              ),
+                              ...produits.map((produit) {
+                                final isLowStock = produit.quantiteStock <= produit.seuilAlerte;
+                                final hasDamaged = produit.quantiteAvariee > 0;
+                                final lotCount = _lotCounts[produit.id] ?? 0;
+                                final exp = _lotMinExp[produit.id];
+                                return InkWell(
+                                  onTap: () => _showProductDetails(context, produit),
+                                  child: Container(
+                                    margin: const EdgeInsets.only(bottom: 8),
+                                    decoration: BoxDecoration(
+                                      color: hasDamaged ? Colors.red.withOpacity(0.05) : (isDarkMode ? Colors.grey.shade900 : Colors.white),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade300),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: isDarkMode ? Colors.black.withOpacity(0.2) : Colors.black.withOpacity(0.04),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 3),
                                         ),
                                       ],
                                     ),
+                                    child: SingleChildScrollView(
+                                      scrollDirection: Axis.horizontal,
+                                      child: Padding(
+                                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                                        child: Row(
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            SizedBox(
+                                              width: 160,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  _highlightText(
+                                                    produit.nom,
+                                                    _searchController.text,
+                                                    const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+                                                    isDarkMode,
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Wrap(
+                                                    spacing: 6,
+                                                    runSpacing: 4,
+                                                    children: [
+                                                      _buildBadge(produit.categorie, const Color(0xFF0E5A8A)),
+                                                      if (produit.dci?.isNotEmpty ?? false)
+                                                        _buildBadge('DCI: ${produit.dci}', Colors.green.shade700),
+                                                      if (isLowStock) _buildBadge('Stock bas', Colors.orange),
+                                                      if (hasDamaged) _buildBadge('Avarié', Colors.red.shade700),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 120,
+                                              child: _highlightText(
+                                                produit.unite,
+                                                _searchController.text,
+                                                const TextStyle(),
+                                                isDarkMode,
+                                              ),
+                                            ),
+                                            SizedBox(
+                                            width: 120,
+                                              child: Text(
+                                                _fmtQty(produit.quantiteStock, produit.unite),
+                                                style: TextStyle(
+                                                  color: isLowStock ? Colors.red : null,
+                                                  fontWeight: isLowStock ? FontWeight.bold : null,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            SizedBox(
+                                            width: 120,
+                                              child: Text(
+                                                _fmtQty(produit.quantiteAvariee, produit.unite),
+                                                style: TextStyle(
+                                                  color: hasDamaged ? Colors.red : null,
+                                                  fontWeight: hasDamaged ? FontWeight.bold : null,
+                                                ),
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
+                                            SizedBox(
+                                            width: 120,
+                                              child: Text(
+                                                '${NumberFormat('#,##0.00', 'fr_FR').format(produit.prixVente)}\u00A0FCFA',
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 140,
+                                              child: _highlightText(
+                                                produit.fournisseurPrincipal ?? 'N/A',
+                                                _searchController.text,
+                                                const TextStyle(),
+                                                isDarkMode,
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 100,
+                                              child: _highlightText(
+                                                produit.statut,
+                                                _searchController.text,
+                                                const TextStyle(),
+                                                isDarkMode,
+                                              ),
+                                            ),
+                                            SizedBox(
+                                              width: 170,
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Row(
+                                                    mainAxisSize: MainAxisSize.min,
+                                                    mainAxisAlignment: MainAxisAlignment.start,
+                                                    children: [
+                                                      IconButton(
+                                                        icon: const Icon(Icons.qr_code_2, color: Color(0xFF0E5A8A), size: 22),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        tooltip: 'Lots / Codes-barres',
+                                                        onPressed: () async {
+                                                          await _showLotsDialog(context, produit);
+                                                          await _loadLotSummaries();
+                                                        },
+                                                      ),
+                                                      IconButton(
+                                                        icon: const Icon(CupertinoIcons.pen, color: Color(0xFF0E5A8A), size: 22),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () => showDialog(
+                                                          context: context,
+                                                          builder: (context) => ProductDialog(
+                                                            database: _database,
+                                                            unites: _unites,
+                                                            categories: _categories,
+                                                            statuts: _statuts,
+                                                            produit: produit,
+                                                            onProductSaved: () {
+                                                              setState(() {
+                                                                _produitsFuture = _getProducts();
+                                                                _loadUnitesAndCategories();
+                                                              });
+                                                              _loadLotSummaries();
+                                                            },
+                                                          ),
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      IconButton(
+                                                        icon: const Icon(CupertinoIcons.exclamationmark_triangle, color: Colors.orange, size: 22),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () => _declareDamaged(produit),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      PopupMenuButton<String>(
+                                                        icon: const Icon(CupertinoIcons.ellipsis_vertical, size: 20),
+                                                        onSelected: (value) => _handleDamagedAction(produit, value),
+                                                        itemBuilder: (context) => [
+                                                          if (produit.quantiteAvariee > 0)
+                                                            const PopupMenuItem(
+                                                              value: 'retour',
+                                                              child: Text('Retour au fournisseur'),
+                                                            ),
+                                                          if (produit.quantiteAvariee > 0)
+                                                            const PopupMenuItem(
+                                                              value: 'detruit',
+                                                              child: Text('Marquer comme détruit'),
+                                                            ),
+                                                        ],
+                                                      ),
+                                                    ],
+                                                  ),
+                                                  if (lotCount > 0)
+                                                    Text(
+                                                      'Lots: $lotCount${exp != null ? ' • Péremption min: ${DateFormat('dd/MM/yyyy').format(exp)}' : ''}',
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        color: (exp != null && exp.isBefore(DateTime.now().add(const Duration(days: 30))))
+                                                            ? Colors.red
+                                                            : Colors.grey.shade700,
+                                                      ),
+                                                    ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                ),
-                              );
-                            },
-                            childCount: produits.length,
+                                );
+                              }).toList(),
+                            ],
                           ),
                         );
                       },

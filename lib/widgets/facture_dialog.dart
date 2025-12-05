@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -696,6 +697,31 @@ class FactureDialog {
                             final quantiteBase = (it['quantiteBase'] as num?) ?? (it['quantite'] as num);
                             if (produit.quantiteStock < quantiteBase) {
                               throw Exception('Stock insuffisant pour ${produit.nom}');
+                            }
+                            // Décrémenter les lots (FEFO)
+                            double remaining = quantiteBase.toDouble();
+                            final lots = await txn.query(
+                              'lots',
+                              where: 'produitId = ? AND quantiteDisponible > 0',
+                              whereArgs: [produit.id],
+                              orderBy: 'dateExpiration IS NULL, dateExpiration ASC',
+                            );
+                            for (final lot in lots) {
+                              if (remaining <= 0) break;
+                              final dispo = (lot['quantiteDisponible'] as num?)?.toDouble() ?? 0;
+                              if (dispo <= 0) continue;
+                              final use = min(dispo, remaining);
+                              final newDispo = dispo - use;
+                              await txn.update(
+                                'lots',
+                                {'quantiteDisponible': newDispo},
+                                where: 'id = ?',
+                                whereArgs: [lot['id']],
+                              );
+                              remaining -= use;
+                            }
+                            if (remaining > 0 && lots.isNotEmpty) {
+                              throw Exception('Stock insuffisant par lot pour ${produit.nom}');
                             }
                             await txn.update(
                               'produits',
